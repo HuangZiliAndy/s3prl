@@ -5,7 +5,7 @@
     <meta name="color-scheme" content="light dark"><link rel="index" title="Index" href="../../../genindex.html" /><link rel="search" title="Search" href="../../../search.html" />
 
     <!-- Generated with Sphinx 5.1.1 and Furo 2023.03.27 -->
-        <title>s3prl.task.event_prediction - S3PRL 0.4.10 documentation</title>
+        <title>s3prl.task.event_prediction - S3PRL 0.4.15 documentation</title>
       <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="../../../_static/styles/furo.css?digest=fad236701ea90a88636c2a8c73b44ae642ed2a53" />
     <link rel="stylesheet" type="text/css" href="../../../_static/styles/furo-extensions.css?digest=30d1aed668e5c3a91c3e3bf6a60b675221979f0e" />
@@ -123,7 +123,7 @@
       </label>
     </div>
     <div class="header-center">
-      <a href="../../../index.html"><div class="brand">S3PRL 0.4.10
+      <a href="../../../index.html"><div class="brand">S3PRL 0.4.15
  documentation</div></a>
     </div>
     <div class="header-right">
@@ -147,7 +147,7 @@
       <div class="sidebar-sticky"><a class="sidebar-brand" href="../../../index.html">
   
   
-  <span class="sidebar-brand-text">S3PRL 0.4.10
+  <span class="sidebar-brand-text">S3PRL 0.4.15
  documentation</span>
   
 </a><form class="sidebar-search-container" method="get" action="../../../search.html" role="search">
@@ -705,7 +705,7 @@
             <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">score_ret</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">):</span>
                 <span class="n">end_scores</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">score</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">score_ret</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span>
                 <span class="c1"># All other scores will also be logged</span>
-                <span class="k">for</span> <span class="p">(</span><span class="n">subscore</span><span class="p">,</span> <span class="n">value</span><span class="p">)</span> <span class="ow">in</span> <span class="n">score_ret</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">subscore</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">score_ret</span><span class="p">:</span>
                     <span class="n">end_scores</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">score</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">subscore</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">value</span>
             <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">score_ret</span><span class="p">,</span> <span class="nb">float</span><span class="p">):</span>
                 <span class="n">end_scores</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">score</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">score_ret</span>
