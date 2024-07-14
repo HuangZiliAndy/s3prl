@@ -3,7 +3,7 @@
 BUT_repo_dir=/scratch4/lgarci27/hzili1/workspace/AMI-diarization-setup
 AMI_dir=/data/lgarci27/hzili1/datasets/amicorpus
 cond=SDM1
-output_dir=/data/lgarci27/hzili1/datasets/s3prl_csp/data/AMI/${cond}_debug
+output_dir=/data/lgarci27/hzili1/datasets/s3prl_csp/data/AMI/${cond}
 espnet_dir=/scratch4/lgarci27/hzili1/workspace/espnet/egs2/ami/asr1/
 
 # Prepare AMI dataset
