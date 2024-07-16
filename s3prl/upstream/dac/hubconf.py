@@ -23,6 +23,7 @@ def dac_local(ckpt, *args, **kwargs):
         feature_selection (int): -1 (default, the last layer) or an int in range(0, max_layer_num)
     """
     assert os.path.isfile(ckpt)
+    kwargs["quantize"] = True
     return _UpstreamExpert(ckpt, *args, **kwargs)
 
 def dac_16kHz(**kwargs):
