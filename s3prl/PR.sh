@@ -13,7 +13,7 @@
 module load cuda/12.1
 export PATH="/home/hzili1/anaconda3/envs/s3prl/bin:$PATH"
 
-upstream=fbank
+upstream=dac_16kHz
 lr=0.001
 exp_dir=/export/c12/hzili1/workspace/JSALT24/workspace/s3prl/s3prl/exp_new/ctc/${upstream}_${lr}
 

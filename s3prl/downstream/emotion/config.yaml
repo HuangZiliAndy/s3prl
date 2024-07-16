@@ -24,7 +24,7 @@ optimizer:
 
 downstream_expert:
   datarc:
-    root: /groups/public/benchmark/IEMOCAP
+    root: /gpfswork/rech/haw/upp27cx/ant_UnivAudioGen_eval/data/IEMOCAP/IEMOCAP_full_release
     meta_data: ./downstream/emotion/meta_data
     test_fold: fold1
     pre_load: True

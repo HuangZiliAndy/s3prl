@@ -23,7 +23,13 @@ def dac_local(ckpt, *args, **kwargs):
         feature_selection (int): -1 (default, the last layer) or an int in range(0, max_layer_num)
     """
     assert os.path.isfile(ckpt)
-    return _UpstreamExpert(ckpt, *args, **kwargs)
+    config = kwargs["model_config"].split(',')
+    downsampling = config[0]
+    modeltype = config[1]
+    z_feats = "z"
+    if len(config) == 3:
+        z_feats = config[2]
+    return _UpstreamExpert(ckpt, downsampling=downsampling, model_type=modeltype, z=z_feats, *args, **kwargs)
 
 def dac_16kHz(**kwargs):
     kwargs["ckpt"] = dac.utils.download(model_type="16khz")

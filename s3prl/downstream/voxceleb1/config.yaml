@@ -25,8 +25,8 @@ optimizer:
 
 downstream_expert: 
   datarc:
-    file_path: /export/c12/hzili1/workspace/JSALT24/datasets/VoxCeleb1
-    meta_data: ./downstream/voxceleb1/veri_test_class.txt
+    file_path: /gpfsdswork/dataset/VoxCeleb1
+    meta_data: ./s3prl/downstream/voxceleb1/veri_test_class.txt
     num_workers: 12
     train_batch_size: 8
     eval_batch_size: 1

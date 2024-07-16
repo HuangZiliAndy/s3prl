@@ -1,5 +1,5 @@
 runner:
-  total_steps: 100000
+  total_steps: 10000
   gradient_clipping: 1
   gradient_accumulate_steps: 2
 
@@ -36,13 +36,13 @@ optimizer:
 downstream_expert:
   corpus:                                 
     name: 'libriphone'                   # Specify corpus
-    path: '/export/corpora5/LibriSpeech'          # Path to raw LibriSpeech dataset
+    path: '/gpfswork/rech/haw/upp27cx/s3prl/librispeech'          # Path to raw LibriSpeech dataset
     lexicon:
       # - downstream/ctc/lexicon/librispeech-lexicon.txt
-      - downstream/ctc/lexicon/librispeech-lexicon-200k-g2p.txt
-      - downstream/ctc/lexicon/librispeech-lexicon-allothers-g2p.txt
+      - s3prl/downstream/ctc/lexicon/librispeech-lexicon-200k-g2p.txt
+      - s3prl/downstream/ctc/lexicon/librispeech-lexicon-allothers-g2p.txt
 
-    train: ['train-clean-100']                # Name of data splits to be used as training set
+    train: ['train-clean-10']                # Name of data splits to be used as training set
     dev: ['dev-clean']                    # Name of data splits to be used as validation set
     test: ['test-clean']
 
@@ -52,7 +52,7 @@ downstream_expert:
   
   text:
     mode: 'word'                       # 'character'/'word'/'subword'
-    vocab_file: 'downstream/ctc/vocab/phoneme.txt'
+    vocab_file: 's3prl/downstream/ctc/vocab/phoneme.txt'
   
   model:
     project_dim: 256
