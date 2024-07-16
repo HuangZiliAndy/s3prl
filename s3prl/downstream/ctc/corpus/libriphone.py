@@ -4,7 +4,7 @@ from collections import defaultdict
 from os.path import join, getsize, isfile
 from joblib import Parallel, delayed
 from torch.utils.data import Dataset
-
+import ipdb
 
 def parse_lexicon(line, tokenizer):
     line.replace('\t', ' ')
@@ -59,7 +59,7 @@ class LibriPhoneDataset(Dataset):
         # List all wave files
         file_list = []
         for s in split:
-            split_list = list(Path(join(path, s)).rglob("*.flac"))
+            split_list = list(Path(join(path, s)).rglob("*/*/*.flac"))
             assert len(split_list) > 0, "No data found @ {}".format(join(path,s))
             file_list += split_list
         

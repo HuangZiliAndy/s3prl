@@ -4,7 +4,6 @@ from os.path import join, getsize
 from joblib import Parallel, delayed
 from torch.utils.data import Dataset
 
-
 def read_text(file):
     '''Get transcription of target wave file, 
        it's somewhat redundant for accessing each txt multiplt times,

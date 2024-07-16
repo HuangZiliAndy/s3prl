@@ -23,14 +23,25 @@ class UpstreamExpert(UpstreamBase):
     The DAC wrapper
     """
 
-    def __init__(self, ckpt, quantize, **kwargs):
+    def __init__(self, ckpt, downsampling=320, model_type="DAC", z="z", **kwargs):
         super().__init__(**kwargs)
-        model = dac.DAC.load(ckpt)
+        self.model_type = model_type
+        self.z = z
+        if model_type == "DAC":
+            model = dac.DAC.load(ckpt)
+        elif model_type == "DACMultiRes":
+            model = dac.model.DACMultiRes.load(ckpt)
+        elif model_type == "DACVqVae2":
+            model = dac.model.DACVqVae2.load(ckpt)
+        else:
+            raise ValueError("Unsuported model type (DAC or DACMultiRes)")
         self.model = model
-        self.quantize = quantize
+        self.downsampling = int(downsampling)
+        print(f"Model: {self.model_type} Features type: {self.z}")
+        #self.quantize = quantize
 
     def get_downsample_rates(self, key: str) -> int:
-        return 320
+        return self.downsampling
 
     def forward(self, wavs):
         device = wavs[0].device
@@ -41,10 +52,13 @@ class UpstreamExpert(UpstreamBase):
         )
         padded_wav = pad_sequence(wavs, batch_first=True)
         padded_wav = padded_wav.unsqueeze(1)
-        if self.quantize:
-            z, codes, latents, commitment_loss, codebook_loss = self.model.encode(padded_wav)
-        else:
-            z = self.model.encoder(padded_wav)
+        #if self.quantize:
+        #    z, codes, latents, commitment_loss, codebook_loss = self.model.encode(padded_wav)
+        #else:
+        #    z = self.model.encoder(padded_wav)
+
+        out = self.model(padded_wav, 16000)
+        z = out[self.z]
 
         return {
             "last_hidden_state": z.transpose(1, 2),

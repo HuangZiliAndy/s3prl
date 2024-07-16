@@ -37,7 +37,6 @@ from s3prl.upstream.wav2vec.hubconf import *
 from s3prl.upstream.wavlm.hubconf import *
 from s3prl.upstream.dac.hubconf import *
 
-
 def options(only_registered_ckpt: bool = False):
     all_options = []
     for name, value in globals().items():

@@ -59,7 +59,7 @@ def create_dataset(split, tokenizer, name, bucketing, batch_size, **kwargs):
         raise NotImplementedError
 
     if split == 'train':
-        kwargs["ratio"] = 1.0
+        kwargs["ratio"] = 1
         kwargs["offset"] = 0
         loader_bs = 1 if bucketing else batch_size
         bucket_size = batch_size if bucketing else 1
