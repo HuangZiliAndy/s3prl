@@ -33,6 +33,8 @@ class UpstreamExpert(UpstreamBase):
             model = dac.model.DACMultiRes.load(ckpt)
         elif model_type == "DACVqVae2":
             model = dac.model.DACVqVae2.load(ckpt)
+        elif model_type == "DACKD":
+            model = dac.model.DACKD.load(ckpt)
         else:
             raise ValueError("Unsuported model type (DAC or DACMultiRes)")
         self.model = model

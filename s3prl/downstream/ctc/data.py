@@ -1,3 +1,4 @@
+import soundfile as sf
 import torch
 import torchaudio
 from functools import partial
@@ -13,8 +14,11 @@ def collect_audio_batch(batch, split, half_batch_size_wav_len=300000):
        e.g. [(file1,txt1),(file2,txt2),...]
     '''
     def audio_reader(filepath):
-        wav, sample_rate = torchaudio.load(filepath)
-        return wav.reshape(-1)
+        #wav, sample_rate = torchaudio.load(filepath)
+        #return wav.reshape(-1)
+        wav, sample_rate = sf.read(filepath)
+        wav = torch.from_numpy(wav)
+        return wav
 
     # Bucketed batch should be [[(file1,txt1),(file2,txt2),...]]
     if type(batch[0]) is not tuple:
