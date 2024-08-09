@@ -281,7 +281,7 @@ def main():
     snr_range.sort()
     num_spk_list = [int(s) for s in args.num_spk.split(',')]
     num_spk_prob = [float(s) for s in args.num_spk_prob.split(',')]
-    
+
     total_srcs = np.max(num_spk_list) + args.add_noise
     for i in range(total_srcs):
         if i == total_srcs - 1:
@@ -350,10 +350,7 @@ def main():
             clean_srcs_list.append(noise)
             snr_list.append(np.random.uniform(snr_range[0], snr_range[1]))
             utt_path_list.append(noise_file)
-        assert len(clean_srcs_list) == len(snr_list)
-
-        ## Scale the audios according to the SNR
-        #clean_srcs_list = scale_audios(clean_srcs_list, snr_list)
+        assert len(clean_srcs_list) == len(snr_list) 
 
         # Decide the start time of each clean segments
         clean_srcs_list_align, start_sample = align_audios(clean_srcs_list, add_noise=args.add_noise, full_overlap=args.full_overlap, s1_first=args.s1_first)
@@ -399,7 +396,7 @@ def main():
                     reverb_srcs_list.append(noise)
                     direct_srcs_list.append(noise)
                 elif args.noise_type == 'point':
-                    reverb_noise, direct_noise = mch_rir_conv(clean_srcs_list_align[num_spk], rir[:, num_spk, :], early_rir_samples)
+                    reverb_noise, direct_noise = mch_rir_conv(clean_srcs_list_align[-1], rir[:, num_spk, :], early_rir_samples)
                     reverb_srcs_list.append(reverb_noise)
                     direct_srcs_list.append(direct_noise)
                 elif args.noise_type == 'none':
@@ -423,14 +420,20 @@ def main():
             info_dict['snr'] = np.array(snr_list)
             info_dict['start_sample'] = np.array(start_sample)
             info_dict['uttpath'] = utt_path_list
-            clean_srcs, _ = scale_audios(clean_srcs, snr_list)
+            clean_srcs_list_align, _ = scale_audios(clean_srcs_list_align, snr_list)
+            clean_srcs = np.stack(clean_srcs_list_align, 0)
             mixture = np.sum(clean_srcs, 0)
+            direct_srcs = None
 
         if args.normalize:
-            max_sample = max(np.max(np.abs(mixture)), np.max(np.abs(clean_srcs)), np.max(np.abs(direct_srcs))) + 1e-12
+            if direct_srcs is not None:
+                max_sample = max(np.max(np.abs(mixture)), np.max(np.abs(clean_srcs)), np.max(np.abs(direct_srcs))) + 1e-12
+            else:
+                max_sample = max(np.max(np.abs(mixture)), np.max(np.abs(clean_srcs))) + 1e-12
             clean_srcs = clean_srcs / max_sample
-            direct_srcs = direct_srcs / max_sample
             mixture = mixture / max_sample
+            if direct_srcs is not None:
+                direct_srcs = direct_srcs / max_sample
 
         print('-' * 80)
         print("{:07d}".format(utt_idx))
@@ -460,16 +463,17 @@ def main():
                 srcname = "s{}".format(i+1)
             sf.write('{}/wav/{}/{}.wav'.format(args.output_dir, srcname, fname), clean_srcs[i, :], args.sr)
 
-        assert num_spk + args.add_noise == len(direct_srcs)
-        for i in range(len(direct_srcs)):
-            if i == len(direct_srcs) - 1:
-                if args.add_noise:
-                    srcname = "noise_direct"
+        if direct_srcs is not None:
+            assert num_spk + args.add_noise == len(direct_srcs)
+            for i in range(len(direct_srcs)):
+                if i == len(direct_srcs) - 1:
+                    if args.add_noise:
+                        srcname = "noise_direct"
+                    else:
+                        srcname = "s{}_direct".format(i+1)
                 else:
                     srcname = "s{}_direct".format(i+1)
-            else:
-                srcname = "s{}_direct".format(i+1)
-            sf.write('{}/wav/{}/{}.wav'.format(args.output_dir, srcname, fname), np.transpose(direct_srcs[i]), args.sr)
+                sf.write('{}/wav/{}/{}.wav'.format(args.output_dir, srcname, fname), np.transpose(direct_srcs[i]), args.sr)
 
     wav_scp_file.close()
     reco2dur_file.close()
