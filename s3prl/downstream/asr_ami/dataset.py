@@ -3,7 +3,6 @@
 import logging
 import os
 import random
-import pandas as pd
 from tqdm import tqdm
 from pathlib import Path
 import numpy as np

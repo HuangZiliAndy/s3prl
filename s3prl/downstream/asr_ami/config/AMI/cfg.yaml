@@ -68,9 +68,9 @@ downstream_expert:
     num_workers: 4
     train_batchsize: 32
     eval_batchsize: 1
-    train_dir: /scratch4/lgarci27/hzili1/datasets/s3prl_csp/s3prl/downstream/asr_ami/SDM1/train_filter
-    dev_dir: /scratch4/lgarci27/hzili1/datasets/s3prl_csp/s3prl/downstream/asr_ami/SDM1/dev_filter
-    test_dir: /scratch4/lgarci27/hzili1/datasets/s3prl_csp/s3prl/downstream/asr_ami/SDM1/test 
+    train_dir: /export/c02/hzili1/datasets/s3prl_csp/downstream/asr_ami/SDM1/train_filter
+    dev_dir: /export/c02/hzili1/datasets/s3prl_csp/downstream/asr_ami/SDM1/dev_filter
+    test_dir: /export/c02/hzili1/datasets/s3prl_csp/downstream/asr_ami/SDM1/test
 
   modelrc:
     project_dim: 1024

@@ -145,9 +145,24 @@ class Featurizer(nn.Module):
         self.name = "Featurizer"
 
         upstream.eval()
-        paired_wavs = [torch.randn(SAMPLE_RATE).to(upstream_device)]
-        with torch.no_grad():
-            paired_features = upstream(paired_wavs)
+        if hasattr(upstream, 'n_chans'):
+            mch = True
+            if upstream.n_chans == -1: # any number of channels
+                n_chans = 3
+            else:
+                n_chans = upstream.n_chans
+        else:
+            mch = False
+
+        if not mch:
+            paired_wavs = [torch.randn(SAMPLE_RATE).to(upstream_device)]
+            with torch.no_grad():
+                paired_features = upstream(paired_wavs)
+        else:
+            print("Multi-channel model using {} channels input".format(upstream.n_chans))
+            paired_wavs = [torch.randn(SAMPLE_RATE, n_chans).to(upstream_device)]
+            with torch.no_grad():
+                paired_features = upstream(paired_wavs)
 
         if feature_selection not in paired_features:
             if "hidden_states" in paired_features:

@@ -1,10 +1,11 @@
 #!/bin/bash
 
-BUT_repo_dir=/scratch4/lgarci27/hzili1/workspace/AMI-diarization-setup
-AMI_dir=/data/lgarci27/hzili1/datasets/amicorpus
+workspace_dir=/export/c02/hzili1/workspace/
+BUT_repo_dir=${workspace_dir}/AMI-diarization-setup
+AMI_dir=/export/corpora5/amicorpus
 cond=SDM1
-output_dir=/data/lgarci27/hzili1/datasets/s3prl_csp/data/AMI/${cond}
-espnet_dir=/scratch4/lgarci27/hzili1/workspace/espnet/egs2/ami/asr1/
+output_dir=/export/c02/hzili1/datasets/s3prl_csp/data/AMI/${cond}
+espnet_dir=${workspace_dir}/espnet/egs2/ami/asr1
 
 # Prepare AMI dataset
 python3 data_prep/prepare_ami.py $BUT_repo_dir $AMI_dir $output_dir --cond $cond

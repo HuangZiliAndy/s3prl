@@ -83,7 +83,6 @@ def main():
         print("Utt {}, {} segments".format(utt, len(segs)))
 
         try:
-            chs = []
             if audio_path.endswith('.wav'):
                 audio, sr = sf.read(audio_path)
             elif audio_path.endswith('|'):
@@ -91,12 +90,12 @@ def main():
                 audio, sr = sf.read(io.BytesIO(p.stdout.read()), dtype="float32")
             else:
                 raise ValueError("Condition not defined.")
-            chs.append(audio)
         except:
             print("Error processing {}, skipping it".format(audio_path))
             continue
 
-        audio = np.stack(chs, axis=1)
+        if len(audio.shape) == 1:
+            audio = audio[:, np.newaxis]
 
         for seg_idx, seg in enumerate(segs):
             try:
