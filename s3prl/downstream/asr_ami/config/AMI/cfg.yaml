@@ -40,7 +40,6 @@ specaug:
 downstream_expert:
   datarc:
     channel: "0"
-    mch: False
     max_samples: 480000
     normalize: True
     zero_infinity: True
@@ -65,7 +64,7 @@ downstream_expert:
       sil_weight: 0
 
   loaderrc:
-    num_workers: 4
+    num_workers: 16
     train_batchsize: 32
     eval_batchsize: 1
     train_dir: /export/c02/hzili1/datasets/s3prl_csp/downstream/asr_ami/SDM1/train_filter

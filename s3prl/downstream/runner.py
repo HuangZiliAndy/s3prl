@@ -152,6 +152,16 @@ class Runner():
             refresh = upstream_refresh,
         ).to(self.args.device)
 
+        #num_trainable_params = sum(p.numel() for p in model.model.parameters() if p.requires_grad)
+        #print("num_trainable_params", num_trainable_params)
+
+        if getattr(self.args, "train_channel_pos_only", False):
+            assert self.args.upstream_trainable
+            model.freeze_all_but_channel_pos()
+
+        #num_trainable_params = sum(p.numel() for p in model.model.parameters() if p.requires_grad)
+        #print("num_trainable_params", num_trainable_params)
+
         if is_initialized() and get_rank() == 0:
             torch.distributed.barrier()
 
