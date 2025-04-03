@@ -224,6 +224,9 @@ def main():
     if args.mic_arch == "AMI":
         angles = np.linspace(0, 2*np.pi, 8, endpoint=False)
         mic_arch = [[0.1 * np.cos(angle), 0.1 * np.sin(angle), 0] for angle in angles]
+    elif args.mic_arch == "ALM":
+        angles = np.linspace(0, 2*np.pi, 8, endpoint=False)
+        mic_arch = [[0.051 * np.cos(angle), 0.051 * np.sin(angle), 0] for angle in angles]
     else:
         raise ValueError("Condition not defined.")
     mic_arch = np.round(np.array(mic_arch), decimals=10)

@@ -1,6 +1,6 @@
-export PATH="/scratch4/lgarci27/hzili1/anaconda3/envs/espnet/bin:$PATH"
+export PATH="/home/hzili1/anaconda3/envs/espnet_24_12_28/bin:$PATH"
 
-espnet_dir="/scratch4/lgarci27/hzili1/workspace/espnet"
+espnet_dir="/export/c02/hzili1/workspace/espnet"
 export PYTHONPATH="${espnet_dir}:$PYTHONPATH"
 export PATH=$espnet_dir/tools/sctk/bin:${PATH}
 _opts="--token_type word --non_linguistic_symbols none --remove_non_linguistic_symbols true"

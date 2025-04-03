@@ -1,18 +1,19 @@
 #!/bin/bash
-#SBATCH -A lgarci27 
-#SBATCH --job-name=cpu
-#SBATCH --partition=shared
-#SBATCH --time=1-00:00:00
+#SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=4
-#SBATCH --export=ALL
+#SBATCH --cpus-per-task=12
+#SBATCH --mem=15360
+#SBATCH --job-name=asr_ami
+#SBATCH --time=3-00:00:00
+#SBATCH --gpus=1
 
-export PATH="/scratch4/lgarci27/hzili1/anaconda3/envs/csp/bin:$PATH"
+source path.sh
 
-output_dir=$1
+mic_arch=AMI
+output_dir=/export/c02/hzili1/workspace/s3prl/s3prl/downstream/sep_alimeeting/${mic_arch}_RIRs_3srcs
 
-python3 downstream/sep_ami/gen_rir.py $output_dir --num_rirs 50000
+python3 downstream/sep_ami/gen_rir.py $output_dir --mic_arch ${mic_arch} --num_rirs 50000
 
 mkdir -p ${output_dir}/train
 for i in $(seq -f "%07g" 1 30000); do

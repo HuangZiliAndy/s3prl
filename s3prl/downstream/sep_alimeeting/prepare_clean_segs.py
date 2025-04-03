@@ -5,31 +5,35 @@ import shutil
 import soundfile as sf
 import numpy as np
 import subprocess 
-import xml.etree.ElementTree as ET
 import matplotlib.pyplot as plt
+import textgrid
 
 parser = argparse.ArgumentParser(description='Extract clean segments')
 parser.add_argument('sdm1_dir', type=str, help='SDM1 directory')
 parser.add_argument('output_dir', type=str, help='Output directory')
-parser.add_argument('annotations', type=str, help='path to meetings.xml file')
+parser.add_argument('near_audio_dir', type=str, help='audio for near field speech')
+parser.add_argument('far_text_dir', type=str, help='text for far field speech')
 parser.add_argument('--overlap_thres', type=float, default=5.0, help='keep the segments whose overlap ratio is smaller than overlap_thres')
 parser.add_argument('--min_dur', type=float, default=0.1, help='segment length should be longer than min_dur')
 args = parser.parse_args()
 
-def get_meetspk2channel(fname):
-    tree = ET.parse(fname)
-    root = tree.getroot()
-    meetspk2channel, meet2spks = {}, {}
-    for meeting in root.findall('meeting'):
-        speakers = meeting.findall('speaker')
-        meet_id = meeting.get('observation')
-        meet2spks[meet_id] = []
-        for speaker in speakers:
-            speaker_channel = speaker.get('channel')
-            speaker_global_name = speaker.get('global_name')
-            meetspk2channel["{}_{}".format(meet_id, speaker_global_name)] = speaker_channel 
-            meet2spks[meet_id].append(speaker_global_name)
-    return meetspk2channel, meet2spks
+def get_meetspk2channel(far_text_dir, near_audio_dir):
+    meetspk2audiopath, meet2spks = {}, {}
+    textgrid_files = list(os.listdir(far_text_dir))
+    textgrid_files.sort()
+    for textgrid_f in textgrid_files:
+        tg = textgrid.TextGrid.fromFile('{}/{}'.format(far_text_dir, textgrid_f))
+        meet = textgrid_f.rstrip('.TextGrid')
+        spk_list = []
+        for tier in tg.tiers:
+            spk = tier.name
+            spk = '_'.join([spk.split('_')[-2], spk.split('_')[-1]])
+            audio_path = "{}/{}_{}.wav".format(near_audio_dir, meet, spk)
+            assert os.path.exists(audio_path)
+            meetspk2audiopath["{}_{}".format(meet, spk)] = audio_path
+            spk_list.append(spk)
+        meet2spks[meet] = spk_list
+    return meetspk2audiopath, meet2spks
 
 def get_wav_scp(fname):
     utt2path = {}
@@ -75,8 +79,10 @@ def get_rttm_scp(fname):
 def get_clean_segments(duration, segs, spk_list, overlap_thres):
     total_frames = round(duration * 100.0)
     spk_matrix = np.zeros((total_frames, len(spk_list)))
+    spkmap = {(spk.split('_')[-1]).lstrip('SPK'): spk for spk in spk_list}
     for seg in segs:
         start_t, end_t, spk = seg
+        spk = spkmap[spk]
         start_frame, end_frame = round(start_t * 100.0), round(end_t * 100.0)
         spk_matrix[start_frame:end_frame, spk_list.index(spk)] = 1
     clean_segs = []
@@ -101,7 +107,7 @@ def main():
     utt2spk_file = open("{}/utt2spk".format(args.output_dir), 'w')
     reco2dur_file = open("{}/reco2dur".format(args.output_dir), 'w')
 
-    meetspk2channel, meet2spks = get_meetspk2channel("{}/corpusResources/meetings.xml".format(args.annotations))
+    meetspk2audiopath, meet2spks = get_meetspk2channel(args.far_text_dir, args.near_audio_dir)
 
     utt2path = get_wav_scp("{}/wav.scp".format(args.sdm1_dir))
     utt2seg = get_rttm_scp("{}/rttm.scp".format(args.sdm1_dir))
@@ -124,8 +130,7 @@ def main():
         try:
             meetspk2audio = {}
             for spk in spklist:
-                channel = meetspk2channel["{}_{}".format(utt, spk)]
-                audio_path_spk = audio_path.replace("Array1-01", "Headset-{}".format(channel))
+                audio_path_spk = meetspk2audiopath["{}_{}".format(utt, spk)]
                 if audio_path_spk.endswith('.wav'):
                     audio, sr = sf.read(audio_path_spk)
                 elif audio_path_spk.endswith('|'):
@@ -144,9 +149,11 @@ def main():
 
         clean_segs_utt = [seg for seg in clean_segs_utt if seg[1] - seg[0] >= args.min_dur]
 
+        spkmap = {(spk.split('_')[-1]).lstrip('SPK'): spk for spk in spklist}
         # write the segment to disk
         for seg in clean_segs_utt:
             start_t, end_t, spk = seg
+            spk = spkmap[spk]
             start_t, end_t = round(start_t, 2), round(end_t, 2)
             start_sample, end_sample = int(round(start_t * 16000.0)), int(round(end_t * 16000.0))
             segname = "{}_{}_{:07d}_{:07d}".format(utt, spk, int(round(start_t * 100)), int(round(end_t * 100)))

@@ -1,0 +1,1 @@
+../sep_ami/gen_rir.py

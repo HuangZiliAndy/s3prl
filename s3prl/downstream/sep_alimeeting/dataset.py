@@ -101,7 +101,7 @@ class SeparationDataset(Dataset):
         self.win_length = win_length
         self.n_srcs = len(self.tgt_conds)
 
-        for f in [self.src_cond] + self.tgt_conds + ['mix']:
+        for f in [self.src_cond] + self.tgt_conds + ['mix']: 
             assert os.path.exists("{}/{}.scp".format(data_dir, f))
         self.utt2srcpath = self.get_utt2path("{}/{}.scp".format(data_dir, src_cond))
         self.utt2tgtpaths = [self.get_utt2path("{}/{}.scp".format(data_dir, tgt_cond)) for tgt_cond in self.tgt_conds]

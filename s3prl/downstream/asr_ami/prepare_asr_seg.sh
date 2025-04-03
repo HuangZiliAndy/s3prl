@@ -17,8 +17,11 @@ max_dur=10000.0
 #input_dir=/export/c02/hzili1/datasets/s3prl_csp/data/AMI/MDM
 #output_dir=/export/c02/hzili1/datasets/s3prl_csp/downstream/asr_ami/MDM
 
-input_dir=/export/c02/hzili1/datasets/s3prl_csp/data/AMI/MDM_BF
-output_dir=/export/c02/hzili1/datasets/s3prl_csp/downstream/asr_ami/MDM_BF
+#input_dir=/export/c02/hzili1/datasets/s3prl_csp/data/AMI/MDM_BF0,4
+#output_dir=/export/c02/hzili1/datasets/s3prl_csp/downstream/asr_ami/MDM_BF0,4
+
+input_dir=/export/c02/hzili1/datasets/s3prl_csp/data/AMI/MDM_BF0,2,4,6
+output_dir=/export/c02/hzili1/datasets/s3prl_csp/downstream/asr_ami/MDM_BF0,2,4,6
 
 for split in dev test train; do
   python downstream/asr_ami/prepare_asr_seg.py \

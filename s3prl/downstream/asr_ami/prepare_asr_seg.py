@@ -39,7 +39,11 @@ def get_text(fname):
         content = fh.readlines()
     for line in content:
         line = line.strip('\n')
-        seg, text = line.split(None, 1)
+        try:
+            seg, text = line.split(None, 1)
+        except:
+            seg = line
+            text = ""
         seg2text[seg] = text
     return seg2text
 
@@ -104,6 +108,10 @@ def main():
                 cnt += 1
                 if end_t - start_t < args.min_dur or end_t - start_t > args.max_dur:
                     print("Skipping {} duration {:.2f}".format(segname, end_t - start_t))
+                    cnt_skip += 1
+                    continue
+                if seg2text[segname] == '':
+                    print("Skipping {} empty text".format(segname))
                     cnt_skip += 1
                     continue
                 start_sample, end_sample = int(start_t * 16000), int(end_t * 16000)

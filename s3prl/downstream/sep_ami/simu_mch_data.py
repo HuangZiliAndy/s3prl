@@ -1,7 +1,6 @@
 import os
 import math
 import numpy as np
-import pyroomacoustics as pra
 import matplotlib.pyplot as plt
 import soundfile as sf
 from scipy import signal
@@ -93,6 +92,7 @@ def scale_audios(srcs, snr_list):
     gain_list = [min(40, -snr_list[i]+energy_dB_list[0]-energy_dB_list[i]) for i in range(len(energy_dB_list))]
     scale_srcs = [srcs[i] * np.power(10, (gain_list[i] / 20.)) for i in range(len(srcs))]
     #energy_dB_list = [compute_energy_dB(src) for src in scale_srcs]
+    #energy_dB_list = [energy_dB_list[0] - e for e in energy_dB_list]
     return scale_srcs, gain_list
 
 def mch_rir_conv(input_wav, mch_rir, early_rir_samples):
@@ -251,7 +251,7 @@ def main():
 
     np.random.seed(args.seed)
 
-    # load AMI clean segments
+    # load clean segments
     #utt2path, reco2dur, location2dur, location2spk, spk2dur, spk2utt = parse_data_dir(args.src_dir)
     utt2path = get_wav_scp("{}/wav.scp".format(args.src_dir))
     utt2spk, spk2utt = get_utt2spk("{}/utt2spk".format(args.src_dir))
@@ -261,7 +261,7 @@ def main():
     spk_list = list(spk2utt.keys())
     spk_list.sort()
     spk_dur_list = [spk2dur[spk] for spk in spk_list]
-    print("{} clean AMI segments, {} speakers".format(len(utt2path), len(spk2utt)))
+    print("{} clean segments, {} speakers".format(len(utt2path), len(spk2utt)))
     early_rir_samples = int(args.early_rir_dur * args.sr)
 
     # load noise segments
@@ -350,7 +350,7 @@ def main():
             clean_srcs_list.append(noise)
             snr_list.append(np.random.uniform(snr_range[0], snr_range[1]))
             utt_path_list.append(noise_file)
-        assert len(clean_srcs_list) == len(snr_list) 
+        assert len(clean_srcs_list) == len(snr_list)
 
         # Decide the start time of each clean segments
         clean_srcs_list_align, start_sample = align_audios(clean_srcs_list, add_noise=args.add_noise, full_overlap=args.full_overlap, s1_first=args.s1_first)
