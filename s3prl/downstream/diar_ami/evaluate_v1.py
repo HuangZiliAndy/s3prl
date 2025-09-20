@@ -10,6 +10,7 @@ from pyannote.audio.core.task import Task
 from pyannote.audio.pipelines.speaker_diarization import SpeakerDiarization
 from pyannote.audio.core.task import Specifications, Problem, Resolution
 from pyannote.audio import Pipeline
+from pyannote.database.util import load_rttm
 from typing import Optional
 from torch.nn.utils.rnn import pad_sequence
 from s3prl.downstream.diar_ami.dataset import DiarizationDataset
@@ -18,6 +19,7 @@ from pathlib import Path
 from pyannote.audio.core.io import Audio
 from tqdm import tqdm
 from torch import Tensor
+import itertools
 
 parser = argparse.ArgumentParser(description='Evaluate diarization model')
 parser.add_argument('ckpt_path', type=str, help='checkpoint path')
@@ -28,6 +30,8 @@ parser.add_argument('--normalize', type=int, default=0, help='whether to normali
 parser.add_argument('--min_cluster_size', type=int, default=12, help='minimum cluster size')
 parser.add_argument('--cluster_thres', type=float, default=0.7045654963945799, help='clustering threshold')
 parser.add_argument('--segmentation_thres', type=float, default=0.5, help='segmentation threshold')
+parser.add_argument('--gt_spk_assign', type=int, default=1, help='whether to use ground truth speaker assignment, this is used to eliminate the influence of speaker embedding')
+parser.add_argument('--ref_rttm', type=str, default=None, help='ground truth rttm file, we use it to get ground truth speaker assignment')
 args = parser.parse_args()
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -117,12 +121,8 @@ class S3PRLModel(Model):
         with torch.no_grad():
             features = self.upstream.model(wavs)
             features = self.featurizer.model(wavs, features)
-            #print("features", [feat.size() for feat in features])
             features = pad_sequence(features, batch_first=True)
-            #print("features", features.size())
             prediction = torch.sigmoid(self.downstream.model.model(features))
-            #print("prediction", prediction.size())
-            #print("prediction", torch.max(prediction), torch.min(prediction))
         return prediction
 
 def main():
@@ -135,41 +135,68 @@ def main():
     featurizer = runner.featurizer
     downstream = runner.downstream
     segmentation_model = S3PRLModel(upstream, featurizer, downstream, num_channels=len(args.channel.split(',')))
-    segmentation_model.specifications = Specifications(
-            problem=Problem.MULTI_LABEL_CLASSIFICATION,
-            resolution=Resolution.FRAME,
-            duration=10.0,
-            min_duration=0.0,
-            warm_up=(0.0, 0.0),
-            classes=[f"speaker#{i+1}" for i in range(4)],
-            powerset_max_classes=None,
-            permutation_invariant=True,
+    if not args.gt_spk_assign:
+        segmentation_model.specifications = Specifications(
+                problem=Problem.MULTI_LABEL_CLASSIFICATION,
+                resolution=Resolution.FRAME,
+                duration=10.0,
+                min_duration=0.0,
+                warm_up=(0.0, 0.0),
+                classes=[f"speaker#{i+1}" for i in range(4)],
+                powerset_max_classes=None,
+                permutation_invariant=True,
+            )
+
+        pipeline = SpeakerDiarization(
+            segmentation=segmentation_model,
+            segmentation_step=0.1,
+            embedding='pyannote/wespeaker-voxceleb-resnet34-LM',
+            embedding_exclude_overlap=True,
+            clustering='AgglomerativeClustering',
+            embedding_batch_size=32,
+            segmentation_batch_size=32,
         )
+        params = {'clustering': {'method': 'centroid', 'min_cluster_size': args.min_cluster_size, 'threshold': args.cluster_thres}, 'segmentation': {'min_duration_off': 0.0, 'threshold': args.segmentation_thres}}
+        pipeline.instantiate(params)
+        pipeline.to(device)
+        pipeline._audio = AudioCustom(sample_rate=pipeline._embedding.sample_rate, mono='chan0')
+    else:
+        assert args.ref_rttm is not None
+        annotations = load_rttm(args.ref_rttm)
+        segmentation_model.specifications = Specifications(
+                problem=Problem.MULTI_LABEL_CLASSIFICATION,
+                resolution=Resolution.FRAME,
+                duration=10.0,
+                min_duration=0.0,
+                warm_up=(0.0, 0.0),
+                classes=[f"speaker#{i+1}" for i in range(4)],
+                powerset_max_classes=None,
+                permutation_invariant=True,
+            )
 
-    pipeline = SpeakerDiarization(
-        segmentation=segmentation_model,
-        segmentation_step=0.1,
-        embedding='pyannote/wespeaker-voxceleb-resnet34-LM',
-        embedding_exclude_overlap=True,
-        clustering='AgglomerativeClustering',
-        embedding_batch_size=32,
-        segmentation_batch_size=32,
-    )
-    params = {'clustering': {'method': 'centroid', 'min_cluster_size': args.min_cluster_size, 'threshold': args.cluster_thres}, 'segmentation': {'min_duration_off': 0.0, 'threshold': args.segmentation_thres}}
-    pipeline.instantiate(params)
-    pipeline.to(device)
-    pipeline._audio = AudioCustom(sample_rate=pipeline._embedding.sample_rate, mono='chan0')
+        pipeline = SpeakerDiarization(
+            segmentation=segmentation_model,
+            segmentation_step=0.1,
+            embedding='pyannote/wespeaker-voxceleb-resnet34-LM',
+            embedding_exclude_overlap=True,
+            clustering='OracleClustering',
+            embedding_batch_size=32,
+            segmentation_batch_size=32,
+        )
+        params = {'clustering': {}, 'segmentation': {'min_duration_off': 0.0, 'threshold': args.segmentation_thres}}
+        pipeline.instantiate(params)
+        pipeline.to(device)
+        pipeline._audio = AudioCustom(sample_rate=16000, mono='chan0')
 
-    ##pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization")
-    ##pipeline.to(device)
+    #pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization")
+    #pipeline.to(device)
 
-    dataset = DiarizationDataset(args.test_dir, num_spks=5, frame_shift=320, channel=args.channel, normalize=args.normalize)
+    if not os.path.exists(args.output_dir):
+        os.makedirs(args.output_dir)
+
+    dataset = DiarizationDataset(args.test_dir, num_spks=5, frame_shift=downstream.model.upstream_rate, channel=args.channel, normalize=args.normalize)
     for i, v in enumerate(tqdm(dataset)):
-        audio, _, _, uttname = v
-        #print('-' * 80)
-        #print("{}/{}".format(i+1, len(dataset)))
-        #print("audio", audio.shape)
-        #print("uttname", uttname)
+        audio, label, length, uttname = v
 
         audio = torch.from_numpy(audio).float()
         if len(audio.size()) == 1:
@@ -177,9 +204,15 @@ def main():
         elif len(audio.size()) == 2:
             audio = audio.transpose(0, 1)
 
-        diar_result = pipeline({"waveform": audio, "sample_rate": 16000, "uri":uttname})
-        with open('{}/{}.rttm'.format(args.output_dir, uttname), 'w') as rttm_f:
-            diar_result.write_rttm(rttm_f)
+        if args.gt_spk_assign:
+            annotation = annotations[uttname]
+            diar_result = pipeline({"waveform": audio, "sample_rate": 16000, "uri": uttname, "annotation": annotation})
+            with open('{}/{}.rttm'.format(args.output_dir, uttname), 'w') as rttm_f:
+                diar_result.write_rttm(rttm_f)
+        else:
+            diar_result = pipeline({"waveform": audio, "sample_rate": 16000, "uri": uttname})
+            with open('{}/{}.rttm'.format(args.output_dir, uttname), 'w') as rttm_f:
+                diar_result.write_rttm(rttm_f)
     return 0
 
 if __name__ == '__main__':

@@ -63,7 +63,7 @@ class DiarizationDataset(Dataset):
         return audio
 
     def get_label(self, rttm_file, duration):
-        nframes = int(duration / self.frame_rate)
+        nframes = int(np.round(duration / self.frame_rate))
         label = np.zeros((nframes, self.num_spks))
         with open(rttm_file, 'r') as fh:
             content = fh.readlines()

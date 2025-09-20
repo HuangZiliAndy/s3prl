@@ -40,6 +40,7 @@ class UnixEncConfig(PretrainedConfig):
         layer_type: str = "transformer",
         checkpoint_activations: bool = False,
         conv_frontend: str = "none",
+        bilabel: bool = False,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -79,3 +80,4 @@ class UnixEncConfig(PretrainedConfig):
         self.layer_type = layer_type
         self.checkpoint_activations = checkpoint_activations
         self.conv_frontend = conv_frontend
+        self.bilabel = bilabel

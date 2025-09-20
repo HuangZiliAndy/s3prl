@@ -648,7 +648,10 @@ class UnixEncModel(PreTrainedModel):
                 self.mask_emb = 0
 
         self.final_proj = nn.Linear(config.encoder_embed_dim, config.num_cluster)
-        self.criterion = nn.CrossEntropyLoss()
+
+        self.bilabel = config.bilabel
+        if self.bilabel:
+            self.final_proj_sec = nn.Linear(config.encoder_embed_dim, config.num_cluster + 1)
 
     def apply_mask(self, x, padding_mask):
         B, C, T, D = x.shape
@@ -697,10 +700,13 @@ class UnixEncModel(PreTrainedModel):
         input_values: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         labels: Optional[torch.Tensor] = None,
+        sec_labels: Optional[torch.Tensor] = None,
         mask: bool = True,
         features_only: bool = False,
         output_layer: Optional[int] = None,
     ):
+        if self.bilabel:
+            assert sec_labels is not None
         padding_mask = ~attention_mask
 
         if self.feature_extractor is not None:
@@ -738,12 +744,28 @@ class UnixEncModel(PreTrainedModel):
         assert (x.size(1) - labels.size(1)) <= 3
         assert labels.size(1) >= x.size(1) # TODO: add support for another case
         labels = labels[:, :x.size(1)]
+        if self.bilabel:
+            sec_labels = sec_labels[:, :x.size(1)]
 
         masked_indices = torch.logical_and(~padding_mask, mask_indices)
-        logit_m = self.final_proj(x[masked_indices])
-        label_m = labels[masked_indices]
-        loss = self.criterion(logit_m, label_m)
-        return {"loss": loss, "logits_m": logit_m, "labels_m": label_m}
+        if self.bilabel:
+            logit_m = self.final_proj(x[masked_indices])
+            label_m = labels[masked_indices]
+            logit_sec_m = self.final_proj_sec(x[masked_indices])
+            label_sec_m = sec_labels[masked_indices]
+            pri_loss = F.cross_entropy(logit_m, label_m)
+
+            weights = torch.ones(logit_sec_m.size(-1), device=x.device)
+            weights[-1] = 1e-10
+            sec_loss = F.cross_entropy(logit_sec_m, label_sec_m, weight=weights)
+            loss = pri_loss + sec_loss
+            assert not torch.isnan(loss)
+            return {"loss": loss, "pri_loss": pri_loss, "sec_loss": sec_loss, "logits_m": logit_m, "labels_m": label_m}
+        else:
+            logit_m = self.final_proj(x[masked_indices])
+            label_m = labels[masked_indices]
+            loss = F.cross_entropy(logit_m, label_m)
+            return {"loss": loss, "logits_m": logit_m, "labels_m": label_m}
 
     def extract_features(
         self,

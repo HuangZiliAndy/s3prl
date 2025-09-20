@@ -40,6 +40,7 @@ from s3prl.upstream.mch_mel_hubert_custom.hubconf import *
 from s3prl.upstream.unix_enc_custom.hubconf import *
 from s3prl.upstream.gcc_phat.hubconf import *
 from s3prl.upstream.residual_unix_enc_custom.hubconf import *
+from s3prl.upstream.whisper.hubconf import *
 
 
 def options(only_registered_ckpt: bool = False):

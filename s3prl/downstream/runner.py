@@ -95,6 +95,10 @@ class Runner():
         self.downstream = self._get_downstream()
         self.all_entries = [self.upstream, self.featurizer, self.downstream]
 
+        num_params_upstream = sum(p.numel() for p in self.upstream.model.parameters())
+        num_params_downstream = sum(p.numel() for p in self.downstream.model.parameters())
+        print("Upstream {:.2f}M params, downstream {:.2f}M params".format(num_params_upstream / 1000000.0, num_params_downstream / 1000000.0))
+
 
     def _load_weight(self, model, name):
         init_weight = self.init_ckpt.get(name)

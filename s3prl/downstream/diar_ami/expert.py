@@ -66,7 +66,7 @@ class DownstreamExpert(nn.Module):
 
         self.model = Model(
             input_dim=self.upstream_dim,
-            output_class_num=self.datarc["num_spks"],
+            output_class_num=self.datarc["num_spks"] if "num_spks" in self.datarc else self.datarc["num_speakers"],
             **self.modelrc,
         )
         self.objective = pit_loss

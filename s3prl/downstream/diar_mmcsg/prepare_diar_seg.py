@@ -1,0 +1,1 @@
+../diar_ami/prepare_diar_seg.py

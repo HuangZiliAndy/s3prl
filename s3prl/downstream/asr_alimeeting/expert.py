@@ -13,7 +13,7 @@ from torch.distributed import is_initialized
 from torch.nn.utils.rnn import pad_sequence
 
 from .model import *
-from ..model import *
+from .model_v1 import *
 from .dataset import ASRDataset
 from .dictionary import Dictionary
 
@@ -127,16 +127,6 @@ class DownstreamExpert(nn.Module):
         if not hasattr(self, f'{split}_dataset'):
             setattr(self, f'{split}_dataset', ASRDataset(split, self.loaderrc[f'{split}_dir'], self.dictionary, **self.datarc))
 
-        #print(split)
-        #for i, v in enumerate(self.train_dataset):
-        #    wav, label, fname = v
-        #    print('-' * 40)
-        #    print('wav', wav.size())
-        #    print('label', label.size())
-        #    print(fname)
-        #    if i == 10:
-        #        break
-
         if split == 'train':
             return self._get_train_dataloader(self.train_dataset)
         elif split == 'dev':
@@ -229,7 +219,6 @@ class DownstreamExpert(nn.Module):
 
             if decoded is not None and "words" in decoded:
                 pred_words = decoded["words"]
-                pred_words = ["".join(pred_words)]
             else:
                 pred_words = token_to_word(pred_tokens).split()
 

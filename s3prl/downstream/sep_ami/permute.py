@@ -7,6 +7,7 @@ parser = argparse.ArgumentParser(description='Prepare ref_text and pred_text for
 parser.add_argument('ref_text', type=str, help='reference text file')
 parser.add_argument('pred_text', type=str, help='predict text file')
 parser.add_argument('output_dir', type=str, help='output directory')
+parser.add_argument('--token', type=str, default='word', help='token level')
 args = parser.parse_args()
 
 def main():
@@ -46,8 +47,15 @@ def main():
             ref_text_list = utt2ref_text[utt]
             pred_text_list = utt2pred_text[utt]
             assert len(ref_text_list) == len(pred_text_list) == 2
-            error1 = editdistance.eval(pred_text_list[0].split(), ref_text_list[0].split()) + editdistance.eval(pred_text_list[1].split(), ref_text_list[1].split())
-            error2 = editdistance.eval(pred_text_list[0].split(), ref_text_list[1].split()) + editdistance.eval(pred_text_list[1].split(), ref_text_list[0].split())
+            if args.token == 'word':
+                error1 = editdistance.eval(pred_text_list[0].split(), ref_text_list[0].split()) + editdistance.eval(pred_text_list[1].split(), ref_text_list[1].split())
+                error2 = editdistance.eval(pred_text_list[0].split(), ref_text_list[1].split()) + editdistance.eval(pred_text_list[1].split(), ref_text_list[0].split())
+            elif args.token == 'char':
+                error1 = editdistance.eval(list(pred_text_list[0]), list(ref_text_list[0])) + editdistance.eval(list(pred_text_list[1]), list(ref_text_list[1]))
+                error2 = editdistance.eval(list(pred_text_list[0]), list(ref_text_list[1])) + editdistance.eval(list(pred_text_list[1]), list(ref_text_list[0]))
+            else:
+                raise NotImplementedError
+
             if error1 <= error2:
                 utt2pred_text_new[utt] = pred_text_list
             else:

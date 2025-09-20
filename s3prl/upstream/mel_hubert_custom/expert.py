@@ -26,15 +26,20 @@ class UpstreamExpert(UpstreamBase):
         #mean, std = np.load(mean_std_file)
         #self.mean, self.std = torch.from_numpy(mean), torch.from_numpy(std)
 
-        assert os.path.exists("{}/libri-960.npz".format(ckpt)) or os.path.exists("{}/combine_v0.npz".format(ckpt))
-        if os.path.exists("{}/libri-960.npz".format(ckpt)):
-            stats_file = "{}/libri-960.npz".format(ckpt)
-            self.scale = True
-        elif os.path.exists("{}/combine_v0.npz".format(ckpt)):
-            stats_file = "{}/combine_v0.npz".format(ckpt)
-            self.scale = False
-        else:
-            stats_file = None
+        #assert os.path.exists("{}/libri-960.npz".format(ckpt)) or os.path.exists("{}/combine_v0.npz".format(ckpt))
+        #if os.path.exists("{}/libri-960.npz".format(ckpt)):
+        #    stats_file = "{}/libri-960.npz".format(ckpt)
+        #    self.scale = True
+        #elif os.path.exists("{}/combine_v0.npz".format(ckpt)):
+        #    stats_file = "{}/combine_v0.npz".format(ckpt)
+        #    self.scale = False
+        #else:
+        #    stats_file = None
+
+        assert os.path.exists("{}/mean_std.npz".format(ckpt))
+        stats_file = "{}/mean_std.npz".format(ckpt)
+        self.scale = False
+
         stats_file = np.load(stats_file)
         self.mean, self.std = stats_file['mean'], stats_file['std']
         print('mean')

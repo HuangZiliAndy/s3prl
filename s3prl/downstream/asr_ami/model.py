@@ -130,7 +130,7 @@ class RNNs(nn.Module):
             x, x_len = rnn(x, x_len)
 
         logits = self.linear(x)
-        return logits, x_len        
+        return logits, x_len
 
 
 class Wav2Letter(nn.Module):

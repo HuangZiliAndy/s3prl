@@ -53,8 +53,11 @@ class S3PRLModel(nn.Module):
 
     def forward(self, waveforms: torch.Tensor, sdm1_waveforms: torch.Tensor) -> torch.Tensor:
         #print("waveforms", waveforms.shape, "sdm1_waveforms", sdm1_waveforms.shape)
-        wavs = [(wav[:, :]).to(device) for wav in waveforms]
-        print([wav.shape for wav in wavs])
+        if waveforms.size(2) == 1:
+            wavs = [(wav[:, 0]).to(device) for wav in waveforms]
+        else:
+            wavs = [(wav[:, :]).to(device) for wav in waveforms]
+        #print([wav.shape for wav in wavs])
         with torch.no_grad():
             features = self.upstream.model(wavs)
             features = self.featurizer.model(wavs, features)
@@ -149,7 +152,7 @@ def main():
         if energy_1 < energy_2:
             pred_audios = torch.flip(pred_audios, dims=[0])
 
-        sf.write("{}/data/{}_mix.wav".format(args.output_dir, uttname), audio[0, 0, :].data.cpu().numpy(), 16000)
+        sf.write("{}/data/{}_mix.wav".format(args.output_dir, uttname), audio[0, :, 0].data.cpu().numpy(), 16000)
         # wav.scp, utt2num_samples, utt2spk
         for src_id in range(args.num_srcs):
             sf.write("{}/data/{}_s{}.wav".format(args.output_dir, uttname, src_id+1), pred_audios[src_id, :].data.cpu().numpy(), 16000)

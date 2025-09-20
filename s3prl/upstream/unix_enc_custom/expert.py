@@ -121,6 +121,9 @@ class UpstreamExpert(UpstreamBase):
         device = wavs[0].device
         input_features, lengths = [], []
         for waveform in wavs:
+            if len(waveform.size()) == 1:
+                waveform = waveform.unsqueeze(-1)
+                
             feats = self._extract_feats(waveform.transpose(0, 1))
             input_features.append(feats)
             lengths.append(feats.size(-2))

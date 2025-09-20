@@ -148,8 +148,8 @@ class SeparationDataset(Dataset):
 
         mix_audio_path = self.utt2mixpath[uttname]
         mix_audio, sr = sf.read(mix_audio_path)
-        assert len(mix_audio.shape) == 2
-        mix_audio = mix_audio[:, self.ref_channel]
+        if len(mix_audio.shape) == 2:
+            mix_audio = mix_audio[:, self.ref_channel]
 
         assert src_audio.shape[0] == tgt_audio.shape[1] == mix_audio.shape[0]
         num_samples = src_audio.shape[0]
