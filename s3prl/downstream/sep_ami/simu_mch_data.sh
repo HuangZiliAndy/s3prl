@@ -17,7 +17,7 @@ IHM_CLEAN_dir=/export/c02/hzili1/datasets/s3prl_csp/downstream/sep_ami/IHM_CLEAN
 annotations=/export/corpora5/amicorpus/ami_public_manual_1.6.2
 #./downstream/sep_ami/prepare_clean_segs.sh $SDM1_dir $IHM_CLEAN_dir $annotations
 
-output_dir=/export/c02/hzili1/datasets/s3prl_csp/downstream/sep_ami/MDM
+output_dir=/export/c02/hzili1/datasets/s3prl_csp/downstream/sep_ami/2spk_reverb_diffuse/MDM
 
 for split in dev test train; do
   data_dir="${IHM_CLEAN_dir}/${split}_filter"
