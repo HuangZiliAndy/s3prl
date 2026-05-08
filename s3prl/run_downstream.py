@@ -109,7 +109,7 @@ def get_downstream_args():
         print(f'[Runner] - Resume from {ckpt_pth}')
 
         # load checkpoint
-        ckpt = torch.load(ckpt_pth, map_location='cpu')
+        ckpt = torch.load(ckpt_pth, map_location='cpu', weights_only=False)
 
         def update_args(old, new, preserve_list=None):
             out_dict = vars(old)
@@ -154,7 +154,6 @@ def main():
     logging.basicConfig(level=logging.INFO)
 
     torch.multiprocessing.set_sharing_strategy('file_system')
-    torchaudio.set_audio_backend('sox_io')
     hack_isinstance()
 
     # get config and arguments
@@ -168,7 +167,7 @@ def main():
         torch.distributed.init_process_group(args.backend)
 
     if args.mode == 'train' and args.past_exp:
-        ckpt = torch.load(args.init_ckpt, map_location='cpu')
+        ckpt = torch.load(args.init_ckpt, map_location='cpu', weights_only=False)
 
         now_use_ddp = is_initialized()
         original_use_ddp = ckpt['Args'].local_rank is not None

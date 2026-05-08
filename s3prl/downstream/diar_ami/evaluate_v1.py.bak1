@@ -1,0 +1,305 @@
+import os
+import torch
+import torchaudio
+import argparse
+import random
+import numpy as np
+from s3prl.downstream.runner import Runner
+from pyannote.audio.core.model import Model
+from pyannote.audio.core.task import Task
+from pyannote.audio.pipelines.speaker_diarization import SpeakerDiarization
+from pyannote.audio.core.task import Specifications, Problem, Resolution
+from pyannote.audio import Pipeline
+from pyannote.database.util import load_rttm
+from typing import Optional
+from torch.nn.utils.rnn import pad_sequence
+from s3prl.downstream.diar_ami.dataset import DiarizationDataset
+from typing import Callable, Mapping, Optional, Text, Union
+from pathlib import Path
+from pyannote.audio.core.io import Audio
+from tqdm import tqdm
+from torch import Tensor
+import itertools
+
+parser = argparse.ArgumentParser(description='Evaluate diarization model')
+parser.add_argument('ckpt_path', type=str, help='checkpoint path')
+parser.add_argument('test_dir', type=str, help='test directory')
+parser.add_argument('output_dir', type=str, help='output directory')
+parser.add_argument('--channel', type=str, default='0', help='audio channel')
+parser.add_argument('--normalize', type=int, default=0, help='whether to normalize audio')
+parser.add_argument('--min_cluster_size', type=int, default=12, help='minimum cluster size')
+parser.add_argument('--cluster_thres', type=float, default=0.7045654963945799, help='clustering threshold')
+parser.add_argument('--segmentation_thres', type=float, default=0.5, help='segmentation threshold')
+parser.add_argument('--gt_spk_assign', type=int, default=1, help='whether to use ground truth speaker assignment, this is used to eliminate the influence of speaker embedding')
+parser.add_argument('--ref_rttm', type=str, default=None, help='ground truth rttm file, we use it to get ground truth speaker assignment')
+args = parser.parse_args()
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+class AudioCustom(Audio):
+    def __init__(self, sample_rate=None, mono=None):
+        super().__init__(sample_rate=sample_rate, mono=mono)
+
+    def downmix_and_resample(self, waveform: Tensor, sample_rate: int) -> Tensor:
+        """Downmix and resample
+
+        Parameters
+        ----------
+        waveform : (channel, time) Tensor
+            Waveform.
+        sample_rate : int
+            Sample rate.
+
+        Returns
+        -------
+        waveform : (channel, time) Tensor
+            Remixed and resampled waveform
+        sample_rate : int
+            New sample rate
+        """
+
+        # downmix to mono
+        num_channels = waveform.shape[0]
+        if num_channels > 1:
+            if self.mono == "random":
+                channel = random.randint(0, num_channels - 1)
+                waveform = waveform[channel : channel + 1]
+            elif self.mono == "downmix":
+                waveform = waveform.mean(dim=0, keepdim=True)
+            elif self.mono == "chan0":
+                waveform = waveform[0 : 1]
+
+        # resample
+        if (self.sample_rate is not None) and (self.sample_rate != sample_rate):
+            waveform = torchaudio.functional.resample(
+                waveform, sample_rate, self.sample_rate
+            )
+            sample_rate = self.sample_rate
+
+        return waveform, sample_rate
+
+class S3PRLModel(Model):
+    def __init__(
+        self,
+        upstream,
+        featurizer,
+        downstream,
+        sample_rate: int = 16000,
+        num_channels: int = 1,
+        task: Optional[Task] = None,
+    ):
+        super().__init__(sample_rate=sample_rate, num_channels=1, task=task)
+
+        self.upstream = upstream
+        self.featurizer = featurizer
+        self.downstream = downstream
+        self.audio = AudioCustom(sample_rate=self.hparams.sample_rate, mono=None)
+
+    def audio(self, file: str):
+        waveform, sample_rate = torchaudio.load(file)
+
+        if waveform.dim() == 1:
+            waveform = waveform.unsqueeze(0)
+
+        return waveform, sample_rate
+
+    def forward(self, waveforms: torch.Tensor) -> torch.Tensor:
+        """Pass forward
+
+        Parameters
+        ----------
+        waveforms : (batch, channel, sample)
+
+        Returns
+        -------
+        scores : (batch, frame, classes)
+        """
+        if waveforms.size(1) == 1:
+            wavs = [(wav[0, :]).to(device) for wav in waveforms]
+        else:
+            wavs = [(wav[:, :]).transpose(0, 1).to(device) for wav in waveforms]
+        with torch.no_grad():
+            features = self.upstream.model(wavs)
+            features = self.featurizer.model(wavs, features)
+            features = pad_sequence(features, batch_first=True)
+            prediction = torch.sigmoid(self.downstream.model.model(features))
+        return prediction
+
+def optimal_match(pred, label):
+    assert len(pred) == len(label)
+    if pred.shape[1] <= label.shape[1]:
+        pred_pad = np.zeros_like(label)
+        pred_pad[:, :pred.shape[1]] = pred
+        perms = list(itertools.permutations(range(pred_pad.shape[1])))
+        perm_and_wrong_frames = []
+        for i, perm in enumerate(perms):
+            pred_perm = pred_pad[:, perm]
+            wrong_frames = np.sum(pred_perm != label)
+            perm_and_wrong_frames.append([perm, wrong_frames])
+        perm_and_wrong_frames = sorted(perm_and_wrong_frames, key=lambda x: x[1])
+        best_perm = perm_and_wrong_frames[0][0]
+        return best_perm, pred_pad[:, best_perm]
+    else:
+        perms = list(itertools.permutations(range(pred.shape[1])))
+        perm_and_wrong_frames = []
+        for i, perm in enumerate(perms):
+            pred_perm = (pred[:, perm])[:, :label.shape[1]]
+            wrong_frames = np.sum(pred_perm != label)
+            perm_and_wrong_frames.append([perm, wrong_frames])
+        perm_and_wrong_frames = sorted(perm_and_wrong_frames, key=lambda x: x[1])
+        best_perm = perm_and_wrong_frames[0][0]
+        return best_perm, pred[:, best_perm][:, :label.shape[1]]
+
+def binary_array_to_segments(arr):
+    arr = np.asarray(arr)
+    padded = np.pad(arr, (1, 1), mode='constant')  # pad with 0 at both ends
+    changes = np.diff(padded)
+    starts = np.where(changes == 1)[0]
+    ends = np.where(changes == -1)[0]
+    return np.stack([starts, ends], axis=1)
+
+def write_rttm(pred, rttm_file, frame_shift, uttname):
+    rttm_file = open(rttm_file, 'w')
+    for i in range(pred.shape[1]):
+        spk_activity = pred[:, i]
+        segments = binary_array_to_segments(spk_activity)
+        for j, seg in enumerate(segments):
+            start_t, end_t = seg[0] * frame_shift / 16000.0, seg[1] * frame_shift / 16000.0
+            rttm_file.write("SPEAKER {} 1 {:.3f} {:.3f} <NA> <NA> SPEAKER_{:02d} <NA> <NA>\n".format(uttname, start_t, end_t - start_t, i))
+    rttm_file.close()
+    return 0
+
+def load_rttm_scp(fname):
+    utt2rttm = {}
+    with open(fname, 'r') as fh:
+        content = fh.readlines()
+    for line in content:
+        line = line.strip('\n')
+        line_split = line.split()
+        utt, rttm_file = line_split[0], line_split[1]
+        utt2rttm[utt] = rttm_file
+    return utt2rttm
+
+def main():
+    print("Loading {}".format(args.ckpt_path))
+    ckpt = torch.load(args.ckpt_path, map_location='cpu')
+    ckpt_args, ckpt_config = ckpt['Args'], ckpt['Config']
+    ckpt_args.init_ckpt = args.ckpt_path
+    runner = Runner(ckpt_args, ckpt_config)
+    upstream = runner.upstream
+    featurizer = runner.featurizer
+    downstream = runner.downstream
+    segmentation_model = S3PRLModel(upstream, featurizer, downstream, num_channels=len(args.channel.split(',')))
+    if not args.gt_spk_assign:
+        segmentation_model.specifications = Specifications(
+                problem=Problem.MULTI_LABEL_CLASSIFICATION,
+                resolution=Resolution.FRAME,
+                duration=10.0,
+                min_duration=0.0,
+                warm_up=(0.0, 0.0),
+                classes=[f"speaker#{i+1}" for i in range(4)],
+                powerset_max_classes=None,
+                permutation_invariant=True,
+            )
+
+        pipeline = SpeakerDiarization(
+            segmentation=segmentation_model,
+            segmentation_step=0.1,
+            embedding='pyannote/wespeaker-voxceleb-resnet34-LM',
+            embedding_exclude_overlap=True,
+            clustering='AgglomerativeClustering',
+            embedding_batch_size=32,
+            segmentation_batch_size=32,
+        )
+        params = {'clustering': {'method': 'centroid', 'min_cluster_size': args.min_cluster_size, 'threshold': args.cluster_thres}, 'segmentation': {'min_duration_off': 0.0, 'threshold': args.segmentation_thres}}
+        pipeline.instantiate(params)
+        pipeline.to(device)
+        pipeline._audio = AudioCustom(sample_rate=pipeline._embedding.sample_rate, mono='chan0')
+    else:
+        assert args.ref_rttm is not None
+        annotations = load_rttm(args.ref_rttm)
+        segmentation_model.specifications = Specifications(
+                problem=Problem.MULTI_LABEL_CLASSIFICATION,
+                resolution=Resolution.FRAME,
+                duration=10.0,
+                min_duration=0.0,
+                warm_up=(0.0, 0.0),
+                classes=[f"speaker#{i+1}" for i in range(4)],
+                powerset_max_classes=None,
+                permutation_invariant=True,
+            )
+
+        pipeline = SpeakerDiarization(
+            segmentation=segmentation_model,
+            segmentation_step=0.1,
+            embedding='pyannote/wespeaker-voxceleb-resnet34-LM',
+            embedding_exclude_overlap=True,
+            clustering='OracleClustering',
+            embedding_batch_size=32,
+            segmentation_batch_size=32,
+        )
+        params = {'clustering': {}, 'segmentation': {'min_duration_off': 0.0, 'threshold': args.segmentation_thres}}
+        pipeline.instantiate(params)
+        pipeline.to(device)
+        pipeline._audio = AudioCustom(sample_rate=16000, mono='chan0')
+
+    #pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization")
+    #pipeline.to(device)
+
+    if not os.path.exists(args.output_dir):
+        os.makedirs(args.output_dir)
+
+    dataset = DiarizationDataset(args.test_dir, num_spks=5, frame_shift=downstream.model.upstream_rate, channel=args.channel, normalize=args.normalize)
+    for i, v in enumerate(tqdm(dataset)):
+        audio, label, length, uttname = v
+
+        audio = torch.from_numpy(audio).float()
+        if len(audio.size()) == 1:
+            audio = audio.unsqueeze(0)
+        elif len(audio.size()) == 2:
+            audio = audio.transpose(0, 1)
+
+        if args.gt_spk_assign:
+
+            #total_frames = label.shape[0]
+            #chunk_size = 10.0 # chunk size 10.0s, matching training setup
+            #assert int(np.round(audio.shape[-1] / downstream.model.upstream_rate)) == total_frames
+            #nframes = int(chunk_size * 16000.0 / downstream.model.upstream_rate)
+            #nchunks = int(np.ceil(total_frames / nframes))
+            #pred_list = []
+            #for chunk_i in range(nchunks):
+            #    if chunk_i < nchunks - 1:
+            #        start_frame, end_frame = nframes * chunk_i, nframes * (chunk_i + 1)
+            #    else:
+            #        start_frame, end_frame = max(0, total_frames - nframes), total_frames
+            #    audio_chunk, label_chunk = audio[..., start_frame * downstream.model.upstream_rate:end_frame * downstream.model.upstream_rate], label[start_frame:end_frame]
+            #    pred_chunk = segmentation_model(audio_chunk.unsqueeze(0))[0]
+            #    assert abs(len(pred_chunk) - nframes) < 3
+            #    if len(pred_chunk) > nframes:
+            #        pred_chunk = pred_chunk[:nframes]
+            #    elif len(pred_chunk) < nframes:
+            #        pred_chunk = torch.cat([pred_chunk, pred_chunk[-(nframes - len(pred_chunk)):]], dim=0)
+            #    pred_chunk = pred_chunk > args.segmentation_thres
+            #    best_perm, pred_chunk_best_perm = optimal_match(pred_chunk.data.cpu().numpy(), label_chunk)
+            #    if chunk_i < nchunks - 1:
+            #        pred_list.append(pred_chunk_best_perm)
+            #    else:
+            #        last_chunk_frames = total_frames - nframes * chunk_i
+            #        pred_list.append(pred_chunk_best_perm[:last_chunk_frames, :])
+            #pred = np.concatenate(pred_list, axis=0)
+            #assert pred.shape == label.shape
+            #rttm_file = '{}/{}.rttm'.format(args.output_dir, uttname)
+            #write_rttm(pred, rttm_file, downstream.model.upstream_rate, uttname)
+
+            annotation = annotations[uttname]
+            diar_result = pipeline({"waveform": audio, "sample_rate": 16000, "uri": uttname, "annotation": annotation})
+            with open('{}/{}.rttm'.format(args.output_dir, uttname), 'w') as rttm_f:
+                diar_result.write_rttm(rttm_f)
+        else:
+            diar_result = pipeline({"waveform": audio, "sample_rate": 16000, "uri": uttname})
+            with open('{}/{}.rttm'.format(args.output_dir, uttname), 'w') as rttm_f:
+                diar_result.write_rttm(rttm_f)
+    return 0
+
+if __name__ == '__main__':
+    main()

@@ -97,6 +97,19 @@ class UpstreamBase(nn.Module, metaclass=initHook):
             generate_hook_handler(self._hook_hiddens, hook)
         )
 
+    def get_collate_fn(self):
+        """
+        Return a CPU preprocessing callable, or None for the default raw-waveform path.
+
+        Signature of the returned callable:
+            fn(wavs: List[Tensor]) -> List[Tensor]
+        Input is a list of 1-D float32 CPU waveform tensors; output is a list of
+        preprocessed CPU tensors (e.g. fbank frames shaped (T, D)).  The runner moves
+        the result to the device and passes it to forward() instead of the raw waveforms.
+        Raw waveforms are kept separately for the Featurizer's length computation.
+        """
+        return None
+
     def __call__(self, wavs: List[Tensor], *args, **kwargs):
         self._hook_hiddens.clear()
 
@@ -247,18 +260,20 @@ class Featurizer(nn.Module):
 
         return weighted_feature
 
-    def tolist(self, paired_wavs: List[Tensor], paired_feature: Tensor):
+    def tolist(self, paired_wavs: List[Tensor], paired_feature: Tensor, output_lengths=None):
         assert paired_feature.dim() == 3, "(batch_size, max_seq_len, feat_dim)"
-        feature_len = [round(len(wav) / self.downsample_rate) for wav in paired_wavs]
-        length_diff = abs(
-            paired_feature.size(1)
-            - round(max([len(wav) for wav in paired_wavs]) / self.downsample_rate)
-        )
-        assert (
-            length_diff < TOLERABLE_SEQLEN_DIFF
-        ), f"{length_diff} >= {TOLERABLE_SEQLEN_DIFF}"
-        feature = [f[:l] for f, l in zip(paired_feature, feature_len)]
-        return feature
+        if output_lengths is not None:
+            feature_len = output_lengths
+        else:
+            feature_len = [round(len(wav) / self.downsample_rate) for wav in paired_wavs]
+            length_diff = abs(
+                paired_feature.size(1)
+                - round(max([len(wav) for wav in paired_wavs]) / self.downsample_rate)
+            )
+            assert (
+                length_diff < TOLERABLE_SEQLEN_DIFF
+            ), f"{length_diff} >= {TOLERABLE_SEQLEN_DIFF}"
+        return [f[:l] for f, l in zip(paired_feature, feature_len)]
 
     def forward(
         self,
@@ -268,5 +283,5 @@ class Featurizer(nn.Module):
         feature = self._select_feature(paired_features)
         if isinstance(feature, (list, tuple)):
             feature = self._weighted_sum(feature)
-
-        return self.tolist(paired_wavs, feature)
+        output_lengths = paired_features.get("output_lengths") if isinstance(paired_features, dict) else None
+        return self.tolist(paired_wavs, feature, output_lengths=output_lengths)

@@ -88,12 +88,20 @@ class Runner():
     def __init__(self, args, config):
         self.args = args
         self.config = config
-        self.init_ckpt = torch.load(self.args.init_ckpt, map_location='cpu') if self.args.init_ckpt else {}
+        self.init_ckpt = torch.load(self.args.init_ckpt, map_location='cpu', weights_only=False) if self.args.init_ckpt else {}
 
         self.upstream = self._get_upstream()
         self.featurizer = self._get_featurizer()
         self.downstream = self._get_downstream()
         self.all_entries = [self.upstream, self.featurizer, self.downstream]
+
+        # Wire upstream CPU preprocessing (e.g. fbank) into DataLoader workers.
+        _upstream_model = getattr(self.upstream.model, 'module', self.upstream.model)
+        _collate_fn = getattr(_upstream_model, 'get_collate_fn', lambda: None)()
+        if _collate_fn is not None:
+            _downstream_model = getattr(self.downstream.model, 'module', self.downstream.model)
+            if hasattr(_downstream_model, 'set_upstream_preprocess'):
+                _downstream_model.set_upstream_preprocess(_collate_fn)
 
 
     def _load_weight(self, model, name):
