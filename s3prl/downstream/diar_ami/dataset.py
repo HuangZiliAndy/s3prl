@@ -61,7 +61,7 @@ class DiarizationDataset(Dataset):
                 dtype="float32",
             )
         else:
-            audio, samplerate = sf.read(wav_path)
+            audio, samplerate = sf.read(wav_path, dtype='float32')
         return audio
 
     def get_label(self, rttm_file, duration):
@@ -87,20 +87,21 @@ class DiarizationDataset(Dataset):
 
     def __getitem__(self, index):
         uttname = self.uttlist[index]
-        wav_path = self.utt2path[uttname] 
+        wav_path = self.utt2path[uttname]
         rttm_path = self.utt2rttm[uttname]
         duration = float(self.reco2dur[uttname])
         audio = self.get_audio(wav_path)
         if self.normalize:
             audio = audio / np.max(np.abs(audio))
         if len(audio.shape) == 2:
-            audio = audio[:, self.channel]
+            audio = np.ascontiguousarray(audio[:, self.channel])
         elif len(audio.shape) == 1:
             assert self.channel == 0
         else:
             raise ValueError("Invalid audio shape")
+        audio = torch.from_numpy(audio)
         if self.wav_preprocess is not None:
-            audio = self.wav_preprocess(torch.from_numpy(audio).float())
+            audio = self.wav_preprocess(audio)
         label, _ = self.get_label(rttm_path, duration)
         return audio, label, label.shape[0], uttname
 

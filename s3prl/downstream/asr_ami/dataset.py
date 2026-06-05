@@ -135,18 +135,18 @@ class ASRDataset(Dataset):
         """
         utt = self.uttlist[index]
         path = self.wav2path[utt]
-        audio = sf.read(path)[0]
+        audio, _ = sf.read(path, dtype='float32')
         if self.normalize:
             audio = audio / (np.max(np.abs(audio)) + 1e-10)
         if len(audio.shape) == 2:
-            audio = audio[:, self.channel]
+            audio = np.ascontiguousarray(audio[:, self.channel])
         elif len(audio.shape) == 1:
             assert self.channel == 0, (
                 f"Channel {self.channel} requested but audio is already mono: {path}"
             )
         else:
             raise ValueError("Invalid audio shape")
-        audio = torch.from_numpy(audio).float()
+        audio = torch.from_numpy(audio)
         if self.wav_preprocess is not None:
             audio = self.wav_preprocess(audio)
 
