@@ -1,0 +1,37 @@
+runner:
+  total_steps: 50000
+  gradient_clipping: 1
+  gradient_accumulate_steps: 1
+  log_step: 200
+  eval_step: 2000
+  save_step: 2000
+  max_keep: 1
+  eval_dataloaders:
+    - dev
+  evaluate_ratio: 1.0
+
+optimizer:
+  name: TorchOptim
+  torch_optim_name: Adam
+  lr: 1.0e-4
+
+downstream_expert:
+  datarc:
+    num_spks: 4
+    rate: 16000
+    frame_shift: null
+    channel: "0"
+    mch: False
+    normalize: False
+
+  loaderrc:
+    num_workers: 16
+    train_batchsize: 32
+    eval_batchsize: 1
+    train_dir: "/export/c02/hzili1/datasets/s3prl_csp/downstream/diar_ami/SDM1/train_filter"
+    dev_dir: "/export/c02/hzili1/datasets/s3prl_csp/downstream/diar_ami/SDM1/dev_filter"
+
+  modelrc: 
+    rnn_layers: 2
+    hidden_size: 512
+    bidirectional: True
