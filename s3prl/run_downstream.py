@@ -84,6 +84,7 @@ def get_downstream_args():
     parser.add_argument('--verbose', action='store_true', help='Print model infomation')
     parser.add_argument('--disable_cudnn', action='store_true', help='Disable CUDNN')
     parser.add_argument('--train_channel_pos_only', default=0, type=int, help='Train the channel positional encoding only, freeze other parameters')
+    parser.add_argument('--upstream_checkpoint_activations', default=0, type=int, help='Enable activation (gradient) checkpointing in the upstream encoder to save GPU memory during finetuning, at the cost of recomputing activations in backward. Default off.')
 
     args = parser.parse_args()
     backup_files = []

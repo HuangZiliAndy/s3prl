@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint
 from torchaudio.compliance.kaldi import fbank
 from transformers import PreTrainedModel
 from upstream.unix_enc_custom.models.configuration_unix_enc import UnixEncConfig
@@ -8,11 +9,20 @@ from fairseq.data.data_utils import compute_mask_indices
 from typing import Dict, List, Optional, Tuple
 import numpy as np
 from fairseq.modules import LayerNorm, SamePad, TransposeLast
+from fairseq.utils import index_put
+import math
+from fairseq.modules.transformer_sentence_encoder import init_bert_params
+from fairseq.models.wav2vec.utils import pad_to_multiple
+from fairseq import utils
 
 
 class MultiheadAttention(nn.Module):
     """Drop-in for fairseq MultiheadAttention with checkpoint-compatible weight names.
     Uses PyTorch's fused in_proj path so it works under bf16/fp16 autocast on sm_120.
+
+    The s3prl upstream substitutes this for fairseq's native MultiheadAttention on the
+    attn_impl="fairseq" path, so fairseq-trained checkpoints run under bf16/fp16 on sm_120.
+    It is numerically identical and weight-compatible with fairseq's MultiheadAttention.
     """
     def __init__(self, embed_dim, num_heads, dropout=0.0, self_attention=True):
         super().__init__()
@@ -39,11 +49,7 @@ class MultiheadAttention(nn.Module):
             need_weights=need_weights,
             attn_mask=attn_mask,
         )
-from fairseq.utils import index_put
-import math
-from fairseq.modules.transformer_sentence_encoder import init_bert_params
-from fairseq.models.wav2vec.utils import pad_to_multiple
-from fairseq import utils
+
 
 def make_conv_pos(e, k, g, is_batch_norm=False):
     pos_conv = nn.Conv1d(
@@ -75,6 +81,112 @@ class Channel0(nn.Module):
     def forward(self, x):
         return x[:, 0, :, :]
 
+class ChannelAttnPool(nn.Module):
+    """Learned attention pooling over the channel axis.
+
+    Collapses [B, C, T, D] -> [B, T, D] by letting a learned per-head query
+    attend across the C channels independently at every (B, T) position. This
+    replaces the non-learned `ch0`/`avg` collapse and stays channel-count
+    agnostic: it works for any C (including C=1) since the softmax is taken over
+    whatever channels are present.
+    """
+
+    def __init__(self, embed_dim, num_heads=8, dropout=0.0, attn_impl="fairseq"):
+        super().__init__()
+        assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
+        self.scaling = self.head_dim ** -0.5
+        self.attn_impl = attn_impl
+
+        self.query = nn.Parameter(torch.empty(num_heads, self.head_dim))
+        nn.init.normal_(self.query, mean=0.0, std=0.02)
+        self.k_proj = nn.Linear(embed_dim, embed_dim)
+        self.v_proj = nn.Linear(embed_dim, embed_dim)
+        self.out_proj = nn.Linear(embed_dim, embed_dim)
+        self.dropout_p = dropout
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x):  # x: [B, C, T, D]
+        B, C, T, D = x.shape
+        H, hd = self.num_heads, self.head_dim
+        k = self.k_proj(x).view(B, C, T, H, hd)
+        v = self.v_proj(x).view(B, C, T, H, hd)
+
+        if self.attn_impl == "sdpa":
+            # SDPA over the channel axis: single learned query (Lq=1), C keys.
+            # Batch the (B, T) positions and heads: N = B*T.
+            N = B * T
+            q = self.query.view(1, H, 1, hd).expand(N, H, 1, hd)            # [N, H, 1, hd]
+            k_s = k.permute(0, 2, 3, 1, 4).reshape(N, H, C, hd)             # [N, H, C, hd]
+            v_s = v.permute(0, 2, 3, 1, 4).reshape(N, H, C, hd)
+            # SDPA applies the 1/sqrt(hd) scaling internally (== self.scaling).
+            out = F.scaled_dot_product_attention(
+                q, k_s, v_s,
+                dropout_p=self.dropout_p if self.training else 0.0,
+            )                                                              # [N, H, 1, hd]
+            out = out.reshape(B, T, D)
+        else:
+            # scores over channels: [B, T, H, C]
+            scores = torch.einsum("hd,bcthd->bthc", self.query, k) * self.scaling
+            attn = torch.softmax(scores, dim=-1)
+            attn = self.dropout(attn)
+            # weighted sum over channels -> [B, T, H, hd] -> [B, T, D]
+            out = torch.einsum("bthc,bcthd->bthd", attn, v).reshape(B, T, D)
+        return self.out_proj(out)
+
+class SDPAMultiheadAttention(nn.Module):
+    """Multi-head attention backed by ``F.scaled_dot_product_attention``.
+
+    Drop-in replacement for the subset of fairseq ``MultiheadAttention`` used by
+    ``MchTransformerEncoderLayer``: it takes/returns sequence-first tensors
+    ``(L, N, D)`` and accepts ``query``/``key``/``value`` (allowing cross
+    attention) plus an optional ``key_padding_mask`` of shape ``(N, L_k)`` where
+    ``True`` marks padding. SDPA dispatches to the flash / memory-efficient
+    kernels, which never materialize the ``L_q x L_k`` score matrix — the source
+    of the OOM in the multi-channel (C>1) layers.
+    """
+
+    def __init__(self, embed_dim, num_heads, dropout=0.0):
+        super().__init__()
+        assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
+        self.dropout = dropout
+
+        self.q_proj = nn.Linear(embed_dim, embed_dim)
+        self.k_proj = nn.Linear(embed_dim, embed_dim)
+        self.v_proj = nn.Linear(embed_dim, embed_dim)
+        self.out_proj = nn.Linear(embed_dim, embed_dim)
+
+    def forward(self, query, key, value, key_padding_mask=None, need_weights=False, attn_mask=None):
+        Lq, N, _ = query.shape
+        Lk = key.shape[0]
+        H, hd = self.num_heads, self.head_dim
+
+        # (L, N, D) -> (N, H, L, hd)
+        q = self.q_proj(query).view(Lq, N, H, hd).permute(1, 2, 0, 3)
+        k = self.k_proj(key).view(Lk, N, H, hd).permute(1, 2, 0, 3)
+        v = self.v_proj(value).view(Lk, N, H, hd).permute(1, 2, 0, 3)
+
+        sdpa_mask = None
+        if key_padding_mask is not None:
+            # fairseq convention: True == pad. SDPA boolean mask: True == attend.
+            sdpa_mask = (~key_padding_mask).view(N, 1, 1, Lk)
+
+        out = F.scaled_dot_product_attention(
+            q, k, v,
+            attn_mask=sdpa_mask,
+            dropout_p=self.dropout if self.training else 0.0,
+        )
+        # (N, H, Lq, hd) -> (Lq, N, D)
+        out = out.permute(2, 0, 1, 3).reshape(Lq, N, self.embed_dim)
+        out = self.out_proj(out)
+        # attn weights not returned (callers always pass need_weights=False)
+        return out, None
+
 class MchTransformerEncoderLayer(nn.Module):
     """
     Implements a Transformer Encoder Layer used in BERT/XLM style pre-trained
@@ -93,6 +205,7 @@ class MchTransformerEncoderLayer(nn.Module):
         layer_norm_first: bool = False,
         layer_type: str = "crosschannel",
         context_size: int = 3,
+        attn_impl: str = "fairseq",
     ) -> None:
 
         super().__init__()
@@ -101,6 +214,7 @@ class MchTransformerEncoderLayer(nn.Module):
         self.dropout = dropout
         self.activation_dropout = activation_dropout
         self.layer_type = layer_type
+        self.attn_impl = attn_impl
 
         # Initialize blocks
         self.activation_fn = utils.get_activation_fn(activation_fn)
@@ -108,12 +222,23 @@ class MchTransformerEncoderLayer(nn.Module):
             self_attention=False
         else:
             self_attention=True
-        self.self_attn = MultiheadAttention(
-            self.embedding_dim,
-            num_attention_heads,
-            dropout=attention_dropout,
-            self_attention=self_attention,
-        )
+        if attn_impl == "sdpa":
+            self.self_attn = SDPAMultiheadAttention(
+                self.embedding_dim,
+                num_attention_heads,
+                dropout=attention_dropout,
+            )
+        elif attn_impl == "fairseq":
+            # s3prl upstream: use the bf16/fp16-safe drop-in in place of fairseq's
+            # native MultiheadAttention (numerically identical, weight-compatible).
+            self.self_attn = MultiheadAttention(
+                self.embedding_dim,
+                num_attention_heads,
+                dropout=attention_dropout,
+                self_attention=self_attention,
+            )
+        else:
+            raise ValueError(f"Unknown attn_impl: {attn_impl}")
         #self.self_attn = torch.nn.MultiheadAttention(
         #    self.embedding_dim,
         #    num_attention_heads, 
@@ -421,6 +546,7 @@ class MchTransformerEncoder(nn.Module):
                         layer_norm_first=args.layer_norm_first,
                         layer_type='crosschannel',
                         context_size=int(layer.lstrip('cc')),
+                        attn_impl=getattr(args, "attn_impl", "fairseq"),
                     )
                 )
             elif layer == 'cf':
@@ -435,18 +561,29 @@ class MchTransformerEncoder(nn.Module):
                         activation_fn=args.activation_fn,
                         layer_norm_first=args.layer_norm_first,
                         layer_type='crossframe',
+                        attn_impl=getattr(args, "attn_impl", "fairseq"),
                     )
                 )
             elif layer == 'avg':
                 layer_list.append(ChannelAverager())
             elif layer == 'ch0':
                 layer_list.append(Channel0())
+            elif layer == 'attnpool':
+                layer_list.append(
+                    ChannelAttnPool(
+                        embed_dim=args.encoder_embed_dim,
+                        num_heads=args.encoder_attention_heads,
+                        dropout=args.attention_dropout,
+                        attn_impl=getattr(args, "attn_impl", "fairseq"),
+                    )
+                )
 
         
         self.layers = nn.ModuleList(layer_list)
         self.layer_norm_first = args.layer_norm_first
         self.layer_norm = LayerNorm(self.embedding_dim)
         self.layerdrop = args.encoder_layerdrop
+        self.checkpoint_activations = getattr(args, "checkpoint_activations", False)
 
         self.apply(init_bert_params)
 
@@ -474,7 +611,7 @@ class MchTransformerEncoder(nn.Module):
         B, C, T, D = x.size(0), x.size(1), x.size(2), x.size(3)
 
         if self.channel_pos_enc is not None:
-            x = x + ((self.channel_pos_enc[:C, :]).unsqueeze(1)).unsqueeze(0)
+            x = x + ((self.channel_pos_enc[:C, :].to(x.dtype)).unsqueeze(1)).unsqueeze(0)
 
         x = x.view(B * C, T, D)
 
@@ -505,15 +642,24 @@ class MchTransformerEncoder(nn.Module):
         r = None
 
         for i, layer in enumerate(self.layers):
-            if isinstance(layer, ChannelAverager) or isinstance(layer, Channel0):
+            if isinstance(layer, (ChannelAverager, Channel0, ChannelAttnPool)):
                 x = layer(x)
                 #print("Layer", i, x.size())
                 continue
             dropout_probability = np.random.random() if self.layerdrop > 0 else 1
             if not self.training or (dropout_probability > self.layerdrop):
-                x, (z, lr) = layer(
-                    x, self_attn_padding_mask=padding_mask, need_weights=False
-                )
+                if self.checkpoint_activations and self.training:
+                    x, (z, lr) = checkpoint(
+                        layer,
+                        x,
+                        self_attn_padding_mask=padding_mask,
+                        need_weights=False,
+                        use_reentrant=False,
+                    )
+                else:
+                    x, (z, lr) = layer(
+                        x, self_attn_padding_mask=padding_mask, need_weights=False
+                    )
                 if i >= min_layer:
                     layer_results.append((x, z, lr))
                 #print("Layer", i, x.size())
@@ -565,9 +711,9 @@ class WhisperConvBlock(nn.Module):
         return x, padding_mask
 
 class WhisperConvBlock2(nn.Module):
-    def __init__(self):
+    def __init__(self, in_dim=514):
         super(WhisperConvBlock2, self).__init__()
-        self.conv1 = nn.Conv1d(514, 128, kernel_size=3, padding=1)
+        self.conv1 = nn.Conv1d(in_dim, 128, kernel_size=3, padding=1)
         self.conv2 = nn.Conv1d(128, 256, kernel_size=3, stride=2, padding=1)
     def forward(self, x, padding_mask): # [B, C, T, D]
         B, C, T, D = x.size()
@@ -628,7 +774,7 @@ class UnixEncModel(PreTrainedModel):
                 self.feature_extractor = WhisperConvBlock()
                 feat_emb_dim = 256
             elif config.conv_frontend == 'whisper2':
-                self.feature_extractor = WhisperConvBlock2()
+                self.feature_extractor = WhisperConvBlock2(in_dim=getattr(config, 'conv_frontend_in_dim', 514))
                 feat_emb_dim = 256
             elif config.conv_frontend == 'conv2d2':
                 self.feature_extractor = Conv2dSubsampling2()
@@ -660,6 +806,7 @@ class UnixEncModel(PreTrainedModel):
                             layer_norm_first=config.layer_norm_first,
                             layer_type='crosschannel',
                             context_size=int(layer.lstrip('cc')),
+                            attn_impl=getattr(config, "attn_impl", "fairseq"),
                         )
                     )
                 else:
@@ -751,7 +898,7 @@ class UnixEncModel(PreTrainedModel):
 
         if self.channel_encoder is not None:
             for i, layer in enumerate(self.channel_encoder):
-                if isinstance(layer, ChannelAverager) or isinstance(layer, Channel0):
+                if isinstance(layer, (ChannelAverager, Channel0, ChannelAttnPool)):
                     features = layer(features)
                 elif isinstance(layer, MchTransformerEncoderLayer):
                     features, (z, lr) = layer(
@@ -820,7 +967,7 @@ class UnixEncModel(PreTrainedModel):
 
         if self.channel_encoder is not None:
             for i, layer in enumerate(self.channel_encoder):
-                if isinstance(layer, ChannelAverager) or isinstance(layer, Channel0):
+                if isinstance(layer, (ChannelAverager, Channel0, ChannelAttnPool)):
                     features = layer(features)
                     hidden_states_raw.append(features)
                 elif isinstance(layer, MchTransformerEncoderLayer):

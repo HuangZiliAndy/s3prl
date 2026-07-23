@@ -64,8 +64,8 @@ def calc_diarization_error(pred, label, length):
         mask[i, : length[i], :] = 1
 
     # pred and label have the shape (batch_size, max_len, num_output)
-    label_np = label.data.cpu().numpy().astype(int)
-    pred_np = (pred.data.cpu().numpy() > 0).astype(int)
+    label_np = label.float().data.cpu().numpy().astype(int)
+    pred_np = (pred.float().data.cpu().numpy() > 0).astype(int)
     label_np = label_np * mask
     pred_np = pred_np * mask
     length = length.data.cpu().numpy()

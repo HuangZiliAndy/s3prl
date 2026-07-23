@@ -215,7 +215,7 @@ def main():
     for i, v in enumerate(tqdm(dataset)):
         audio, label, length, uttname = v
 
-        audio = torch.from_numpy(audio).float()
+        audio = audio.float()
         if len(audio.size()) == 1:
             audio = audio.unsqueeze(0)
         elif len(audio.size()) == 2:

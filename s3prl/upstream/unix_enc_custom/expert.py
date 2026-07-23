@@ -22,10 +22,19 @@ class UpstreamExpert(UpstreamBase):
         config = UnixEncConfig.from_json_file(config_path)
         config.encoder_layerdrop = 0.0
 
-        if config.conv_frontend == 'whisper2':
-            self.feats_type = 'STFT_CAT'
-        else:
-            self.feats_type = 'FBANK'
+        # Activation checkpointing is a finetuning-time memory/compute tradeoff, not a
+        # property of the pretrained model, so ignore whatever value the checkpoint
+        # config may carry and default it off (preserving prior experiments' behavior).
+        # Enable per-run via set_checkpoint_activations(), which the runner wires to the
+        # --upstream_checkpoint_activations SUPERB finetuning flag.
+        config.checkpoint_activations = False
+
+        # feats_type is the acoustic feature the model was trained on. It is read from
+        # the checkpoint config; checkpoints predating this field fall back to the
+        # frontend-implied default (whisper2 -> STFT_CAT, otherwise FBANK).
+        self.feats_type = getattr(config, 'feats_type', None)
+        if self.feats_type is None:
+            self.feats_type = 'STFT_CAT' if config.conv_frontend == 'whisper2' else 'FBANK'
 
         if self.feats_type == 'FBANK':
             assert os.path.exists("{}/combine_v0.npz".format(ckpt))
@@ -100,6 +109,25 @@ class UpstreamExpert(UpstreamBase):
                 fbank_feats = torch.cat([fbank_feats, torch.zeros((C, 1, D), device=fbank_feats.device, dtype=fbank_feats.dtype)], dim=1)
             fbank_feats = fbank_feats.view(C, -1, 2, D).reshape(C, -1, 2 * D)
             return fbank_feats
+        elif self.feats_type == 'LFB+IPD2':
+            # homogeneous per-channel: every channel c -> [log mel filterbank(c), cosine IPD(c vs channel 0)]
+            # channel 0's IPD is cos(0)=1 (constant). Left at the hop=160 (10ms) rate;
+            # the whisper2 conv frontend downsamples /2 to the 20ms label rate.
+            x_stft = torch.view_as_real(torch.stft(
+                waveform, n_fft=512, win_length=400, hop_length=160,
+                window=torch.hann_window(400, device=waveform.device),
+                center=True, return_complex=True,
+            ))  # (C, F, T_stft, 2)
+            mel_scale = torchaudio.transforms.MelScale(
+                n_mels=80, sample_rate=16000, n_stft=257
+            ).to(waveform.device)
+            specgram = x_stft[..., 0] ** 2 + x_stft[..., 1] ** 2  # (C, F, T_stft)
+            log_mel = torch.log1p(mel_scale(specgram))  # (C, 80, T_stft)
+
+            phase = torch.atan2(x_stft[..., 1], x_stft[..., 0])  # (C, F, T_stft)
+            cos_ipd = mel_scale(torch.cos(phase - phase[0:1, :, :]))  # (C, 80, T_stft); channel 0 -> cos(0)=1
+            feats = torch.cat([log_mel, cos_ipd], dim=1)  # (C, 160, T_stft)
+            return feats.transpose(1, 2)  # (C, T_stft, 160)
         elif self.feats_type == 'STFT':
             stft_feats = torch.stft(waveform, n_fft=512, hop_length=160, win_length=400, window=torch.hann_window(400).to(waveform.device), return_complex=True)
             stft_mag = torch.log1p(torch.abs(stft_feats))
@@ -140,6 +168,22 @@ class UpstreamExpert(UpstreamBase):
 
         output = self.model.extract_features(**batch)
         return {"hidden_states": output["hidden_states"]}
+
+    def set_checkpoint_activations(self, enable=True):
+        """Toggle transformer-layer activation checkpointing on the encoder(s).
+
+        When enabled, each encoder layer's activations are recomputed during the
+        backward pass instead of being stored, trading ~20-30% extra compute for a
+        large activation-memory saving. Inert at eval time: the encoder only
+        checkpoints when self.training is True, so feature extraction / inference is
+        unaffected. Returns the number of modules toggled.
+        """
+        n = 0
+        for m in self.modules():
+            if hasattr(m, "checkpoint_activations"):
+                m.checkpoint_activations = enable
+                n += 1
+        return n
 
     def freeze_all_but_channel_pos(self):
         self.model.encoder.channel_pos_enc

@@ -36,8 +36,11 @@ class UnixEncConfig(PretrainedConfig):
         encoder_layerdrop: float = 0.0,
         required_seq_len_multiple: int = 2,
         layer_type: str = "transformer",
+        attn_impl: str = "fairseq",
         checkpoint_activations: bool = False,
         conv_frontend: str = "none",
+        conv_frontend_in_dim: int = 514,
+        feats_type: str = None,
         bi_label: bool = False,
         **kwargs
     ):
@@ -74,6 +77,9 @@ class UnixEncConfig(PretrainedConfig):
         self.encoder_layerdrop = encoder_layerdrop
         self.required_seq_len_multiple = required_seq_len_multiple
         self.layer_type = layer_type
+        self.attn_impl = attn_impl
         self.checkpoint_activations = checkpoint_activations
         self.conv_frontend = conv_frontend
+        self.conv_frontend_in_dim = conv_frontend_in_dim
+        self.feats_type = feats_type
         self.bi_label = bi_label

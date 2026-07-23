@@ -163,6 +163,15 @@ class Runner():
         if is_initialized() and get_rank() == 0:
             torch.distributed.barrier()
 
+        if getattr(self.args, 'train_channel_pos_only', 0):
+            assert self.args.upstream_trainable, "--train_channel_pos_only requires --upstream_trainable (-f)"
+            model.freeze_all_but_channel_pos()
+
+        if getattr(self.args, 'upstream_checkpoint_activations', 0):
+            assert self.args.upstream_trainable, "--upstream_checkpoint_activations requires --upstream_trainable (-f)"
+            n = model.set_checkpoint_activations(True)
+            show(f'[Runner] - Enabled activation checkpointing on {n} upstream module(s)')
+
         return self._init_model(
             model = model,
             name = 'Upstream',
@@ -246,9 +255,13 @@ class Runner():
 
         # set amp
         amp = self.config['runner'].get('fp16', False)
+        bf16 = self.config['runner'].get('bf16', False)
         if amp:
             print('[Runner] - Enabled fp16 training')
             scaler = torch.cuda.amp.GradScaler()
+        elif bf16:
+            print('[Runner] - Enabled bf16 training (mixed precision, float32 master weights)')
+            torch.backends.cuda.enable_flash_sdp(False)
 
         # optimizer
         optimizer = self._get_optimizer(trainable_models)
@@ -300,7 +313,7 @@ class Runner():
 
                     wavs = [torch.FloatTensor(wav).to(self.args.device) for wav in wavs]
 
-                    with torch.cuda.amp.autocast(enabled=amp):
+                    with torch.amp.autocast('cuda', dtype=torch.float16, enabled=amp) if not bf16 else torch.amp.autocast('cuda', dtype=torch.bfloat16):
                         if self.upstream.trainable:
                             features = self.upstream.model(wavs)
                         else:
@@ -323,7 +336,7 @@ class Runner():
                     if amp:
                         scaler.scale(loss).backward()
                     else:
-                        loss.backward()
+                        loss.backward()  # bf16 needs no scaler
                     del loss
 
                 except RuntimeError as e:
@@ -467,6 +480,9 @@ class Runner():
         evaluate_ratio = float(self.config["runner"].get("evaluate_ratio", 1))
         evaluate_steps = round(len(dataloader) * evaluate_ratio)
 
+        bf16 = self.config['runner'].get('bf16', False)
+        amp_ctx = torch.amp.autocast('cuda', dtype=torch.bfloat16) if bf16 else torch.amp.autocast('cuda', enabled=False)
+
         batch_ids = []
         records = defaultdict(list)
         for batch_id, (wavs, *others) in enumerate(tqdm(dataloader, dynamic_ncols=True, desc=split, total=evaluate_steps)):
@@ -474,7 +490,7 @@ class Runner():
                 break
 
             wavs = [torch.FloatTensor(wav).to(self.args.device) for wav in wavs]
-            with torch.no_grad():
+            with torch.no_grad(), amp_ctx:
                 features = self.upstream.model(wavs)
                 features = self.featurizer.model(wavs, features)
                 self.downstream.model(

@@ -40,7 +40,7 @@ max_dur=10000.0
 # Recording conditions to process. Examples:
 #   SDM1 — Single Distant Microphone (mono)
 #   MDM  — Multiple Distant Microphones (multi-channel)
-for cond in SDM1; do
+for cond in MDM; do
   input_dir=${ami_data_dir}/${cond}
   output_dir=${output_base_dir}/${cond}
 

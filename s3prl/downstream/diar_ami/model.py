@@ -35,7 +35,6 @@ class Model(nn.Module):
             self.linear = nn.Linear(input_dim, output_class_num)
 
     def forward(self, features):
-        features = features.float()
         if self.use_rnn:
             hidden, _ = self.rnn(features)
             predicted = self.linear(hidden)

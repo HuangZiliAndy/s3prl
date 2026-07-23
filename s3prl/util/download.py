@@ -23,7 +23,7 @@ from tqdm import tqdm
 logger = logging.getLogger(__name__)
 
 
-_download_dir = Path.home() / ".cache" / "s3prl" / "download"
+_download_dir = Path("/workspace/workspace/s3prl/upstream_models")
 
 __all__ = [
     "get_dir",
